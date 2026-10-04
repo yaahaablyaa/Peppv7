@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: restaurant-staff-bot
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: NODE_VERSION
+        value: 22

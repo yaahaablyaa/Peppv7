@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Рабочее место</title>
+<script>
+(function () {
+  var BUILD = "33";
+  function report(kind, message, source, line, column, stack) {
+    try {
+      navigator.sendBeacon("_client-error", new Blob([JSON.stringify({
+        kind: kind, message: String(message || ""), stack: String(stack || ""),
+        source: source || "", line: line || null, column: column || null,
+        url: location.href, build: BUILD,
+      })], { type: "application/json" }));
+    } catch (e) {}
+  }
+  window.onerror = function (m, s, l, c, err) {
+    report("error", m, s, l, c, err && err.stack);
+  };
+  window.addEventListener("unhandledrejection", function (e) {
+    var r = e.reason || {};
+    report("unhandledrejection", r.message || r, "", null, null, r.stack);
+  });
+})();
+</script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="ios.css">
+</head>
+<body>
+<main class="app scroll-content" id="app"></main>
+<div class="scroll-edge scroll-edge--top" aria-hidden="true"></div>
+<div class="scroll-edge scroll-edge--bottom" aria-hidden="true"></div>
+<nav class="tabbar" id="tabbar"></nav>
+<script src="lib.js"></script>
+<script src="applications.js"></script>
+<script src="learning.js"></script>
+<script src="analytics.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
