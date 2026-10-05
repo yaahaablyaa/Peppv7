@@ -60,7 +60,7 @@ function rerender(html) {
     const screen = el.querySelector(".screen");
     if (screen)
         screen.classList.add("screen--static");
-    window.scrollTo(0, y);
+    window.scrollTo({ top: y, left: 0, behavior: "instant" });
     el.scrollTop = inner;
 }
 function afterRender() {

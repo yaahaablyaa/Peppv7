@@ -105,22 +105,6 @@ function renderAnalytics(d) {
     return html + "</div>";
 }
 function money_(v) { return money(v); }
-async function loadAnalytics() {
-    try {
-        const d = await api(`/analytics/overview?view=${analyticsView}&month=${analyticsMonth}&branch=${analyticsBranch}`);
-        if (activeTab !== "analytics")
-            return;
-        if (d.error) {
-            root().innerHTML = errorState("Не удалось загрузить аналитику. Доступ только для менеджера.");
-            return;
-        }
-        analyticsData = d;
-        root().innerHTML = renderAnalytics(d);
-    }
-    catch (e) {
-        root().innerHTML = errorState("Не удалось загрузить данные. Проверьте связь.");
-    }
-}
 function handleAnalyticsAction(action) {
     if (action.indexOf("an-view:") === 0) {
         const v = action.slice(8);
@@ -171,6 +155,7 @@ async function loadAnalyticsKeep() {
             return;
         }
         analyticsData = d;
+        tabCache[tabKey("analytics")] = renderAnalytics(d);
         rerender(renderAnalytics(d));
     }
     catch (e) {

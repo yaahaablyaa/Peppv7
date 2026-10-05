@@ -6,7 +6,7 @@
 <title>Рабочее место</title>
 <script>
 (function () {
-  var BUILD = "33";
+  var BUILD = "35";
   function report(kind, message, source, line, column, stack) {
     try {
       navigator.sendBeacon("_client-error", new Blob([JSON.stringify({
@@ -28,6 +28,7 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="stylesheet" href="styles.css">
 <link rel="stylesheet" href="ios.css">
+<link rel="stylesheet" href="desktop.css">
 </head>
 <body>
 <main class="app scroll-content" id="app"></main>

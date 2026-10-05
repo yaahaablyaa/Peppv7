@@ -333,3 +333,29 @@ body.is-fullscreen .app { padding-top: calc(16px + var(--fullscreen-safe-top, 0p
 .an-branch + .an-branch { border-top: .5px solid var(--separator); }
 .an-branch:active { background: var(--fill); }
 .team-shift--locked { opacity: .45; cursor: default; }
+
+/* ----- tab switching: directional, smooth ----- */
+#tabbar, .tabbar { view-transition-name: tabbar; }
+::view-transition-group(tabbar) { animation: none; }
+::view-transition-old(tabbar) { display: none; }
+::view-transition-new(tabbar) { animation: none; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .46s; animation-timing-function: cubic-bezier(.22, .9, .24, 1); animation-fill-mode: both; mix-blend-mode: normal; }
+html[data-vt="fwd"]::view-transition-old(root) { animation-name: vt-out-left; }
+html[data-vt="fwd"]::view-transition-new(root) { animation-name: vt-in-right; }
+html[data-vt="back"]::view-transition-old(root) { animation-name: vt-out-right; }
+html[data-vt="back"]::view-transition-new(root) { animation-name: vt-in-left; }
+@keyframes vt-out-left { to { transform: translateX(-16%) scale(.985); opacity: 0; } }
+@keyframes vt-in-right { from { transform: translateX(22%) scale(.985); opacity: 0; } }
+@keyframes vt-out-right { to { transform: translateX(16%) scale(.985); opacity: 0; } }
+@keyframes vt-in-left { from { transform: translateX(-22%) scale(.985); opacity: 0; } }
+/* During a view transition the page itself does the motion: no second entrance animation. */
+.screen--vt, .screen--vt .section, .screen--vt .hero, .screen--vt .stat, .screen--vt .progress-grid, .screen--vt .tr-card, .screen--vt .cl-card, .screen--vt .rep-card, .screen--vt .chart-card, .screen--vt .month-nav, .screen--vt .seg { animation: none; }
+/* Fallback without View Transitions */
+.screen--from-right { animation: tab-from-right .5s cubic-bezier(.22, .9, .24, 1) both; }
+.screen--from-left { animation: tab-from-left .5s cubic-bezier(.22, .9, .24, 1) both; }
+@keyframes tab-from-right { from { opacity: 0; transform: translateX(26px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes tab-from-left { from { opacity: 0; transform: translateX(-26px) scale(.985); } to { opacity: 1; transform: none; } }
+/* Quiet refresh when the same screen is reloaded */
+.screen--static { animation: none; }
+.tab-loading { animation: none; }
+.app { overflow-x: clip; }

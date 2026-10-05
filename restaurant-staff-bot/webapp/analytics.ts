@@ -142,18 +142,6 @@ function renderAnalytics(d: AnalyticsData): string {
 
 function money_(v: number): string { return money(v); }
 
-async function loadAnalytics(): Promise<void> {
-  try {
-    const d = await api<AnalyticsData>(`/analytics/overview?view=${analyticsView}&month=${analyticsMonth}&branch=${analyticsBranch}`);
-    if (activeTab !== "analytics") return;
-    if (d.error) { root().innerHTML = errorState("Не удалось загрузить аналитику. Доступ только для менеджера."); return; }
-    analyticsData = d;
-    root().innerHTML = renderAnalytics(d);
-  } catch (e) {
-    root().innerHTML = errorState("Не удалось загрузить данные. Проверьте связь.");
-  }
-}
-
 function handleAnalyticsAction(action: string): boolean {
   if (action.indexOf("an-view:") === 0) {
     const v = action.slice(8) as AnalyticsView;
@@ -196,6 +184,7 @@ async function loadAnalyticsKeep(): Promise<void> {
     if (activeTab !== "analytics") return;
     if (d.error) { analyticsBranch = "all"; return; }
     analyticsData = d;
+    tabCache[tabKey("analytics")] = renderAnalytics(d);
     rerender(renderAnalytics(d));
   } catch (e) {
     tg.showAlert("Не удалось загрузить данные. Проверьте связь.");

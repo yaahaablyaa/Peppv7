@@ -67,7 +67,7 @@ function rerender(html: string): void {
   el.innerHTML = html;
   const screen = el.querySelector(".screen");
   if (screen) screen.classList.add("screen--static");
-  window.scrollTo(0, y);
+  window.scrollTo({ top: y, left: 0, behavior: "instant" as ScrollBehavior });
   el.scrollTop = inner;
 }
 

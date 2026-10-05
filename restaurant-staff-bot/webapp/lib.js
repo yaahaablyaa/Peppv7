@@ -39,6 +39,8 @@ async function api(path, init) {
         },
     });
     const json = (await res.json());
+    if (init && init.method && init.method.toUpperCase() !== "GET" && typeof invalidateTabs === "function")
+        invalidateTabs();
     if (json && json.data !== undefined)
         return json.data;
     return json;

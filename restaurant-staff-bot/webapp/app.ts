@@ -61,7 +61,7 @@ function renderHome(d: HomeData): string {
     ? "Приход ещё не отмечен"
     : "Отдыхайте";
 
-  let html = '<div class="screen">';
+  let html = '<div class="screen screen--home">';
   html += `<div class="screen-title">Привет, ${esc(d.employee.name.split(" ")[0])}</div>`;
   html += `<div class="screen-sub">${humanDate(t.date)} · ${esc(d.employee.position)}</div>`;
 
@@ -636,50 +636,172 @@ function showTabLoading(blocks: number): void {
   root().innerHTML = '<div class="tab-loading" aria-busy="true"><div class="tab-loading-progress"><span></span></div>' + skeleton(blocks) + "</div>";
 }
 
+/* ---- tab navigation: instant from cache, prefetch, directional transitions ---- */
+
+const TAB_ORDER: string[] = ["home", "schedule", "attendance", "salary", "more", "analytics"];
+const tabCache: Record<string, string> = {};
+const tabPending: Record<string, Promise<TabResult> | undefined> = {};
+let paintedTab: string | null = null;
+let tabSeq = 0;
+let prefetchTimer = 0;
+
+interface TabResult { html: string; ok: boolean }
+
+function tabKey(tab: string): string {
+  if (tab === "schedule") return "schedule:" + calendarMonth;
+  if (tab === "salary") return "salary:" + salaryMonth + ":" + (salaryView || "auto");
+  return tab;
+}
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/** Builds the HTML of a tab from the server. Never touches the DOM except tab bar bootstrap. */
+async function buildTab(tab: TabId): Promise<TabResult> {
+  try {
+    if (tab === "home" || tab === "attendance") {
+      const d = await api<HomeData>("/home");
+      if (d.error) return { html: noAccess(), ok: false };
+      const first = !profile;
+      profile = d.employee;
+      applyTheme(profile.theme);
+      if (first || !document.querySelector(".tab")) buildTabBar();
+      return { html: tab === "home" ? renderHome(d) : renderAttendance(d), ok: true };
+    }
+    if (tab === "schedule") {
+      const d = await api<ScheduleData>("/schedule?month=" + calendarMonth);
+      if (d.error) return { html: noAccess(), ok: false };
+      return { html: renderSchedule(d), ok: true };
+    }
+    if (tab === "salary") {
+      const d = await api<SalaryData>("/salary?month=" + salaryMonth + (salaryView ? "&view=" + salaryView : ""));
+      if (d.error) return { html: noAccess(), ok: false };
+      salaryMonth = d.month;
+      salaryView = d.view;
+      return { html: renderSalary(d), ok: true };
+    }
+    if (tab === "analytics") {
+      if (!profile) {
+        const me = await api<{ employee: Employee; error?: string }>("/me");
+        if (!me.employee) return { html: noAccess(), ok: false };
+        profile = me.employee;
+      }
+      if (!canAnalytics(profile)) return { html: errorState("Раздел доступен менеджеру и финансовому директору."), ok: false };
+      const d = await api<AnalyticsData>(`/analytics/overview?view=${analyticsView}&month=${analyticsMonth}&branch=${analyticsBranch}`);
+      if (d.error) return { html: errorState("Не удалось загрузить аналитику."), ok: false };
+      analyticsData = d;
+      return { html: renderAnalytics(d), ok: true };
+    }
+    const d = profile ? { employee: profile } : await api<{ employee: Employee; error?: string }>("/me");
+    if (!d.employee) return { html: noAccess(), ok: false };
+    profile = d.employee;
+    applyTheme(profile.theme);
+    return { html: renderMore(d.employee), ok: true };
+  } catch (err) {
+    return { html: errorState("Не удалось загрузить данные. Проверьте связь."), ok: false };
+  }
+}
+
+function requestTab(tab: TabId): Promise<TabResult> {
+  const key = tabKey(tab);
+  const pending = tabPending[key];
+  if (pending) return pending;
+  const p = buildTab(tab).then((r) => {
+    delete tabPending[key];
+    if (r.ok) tabCache[key] = r.html;
+    return r;
+  });
+  tabPending[key] = p;
+  return p;
+}
+
+function prefetchTab(tab: TabId): void {
+  if (loginMode || !profile) return;
+  const key = tabKey(tab);
+  if (tabCache[key] === undefined && !tabPending[key]) void requestTab(tab);
+}
+
+function prefetchAll(): void {
+  window.clearTimeout(prefetchTimer);
+  prefetchTimer = window.setTimeout(() => {
+    (["schedule", "attendance", "salary", "more", "home"] as TabId[]).forEach(prefetchTab);
+  }, 350);
+}
+
+function invalidateTabs(): void {
+  Object.keys(tabCache).forEach((k) => delete tabCache[k]);
+  if (paintedTab) prefetchAll();
+}
+
+/** Swaps the content. kind: "switch" slides between tabs, "stay" quietly refreshes, "first" is the initial paint. */
+function paintTab(tab: string, html: string, kind: "switch" | "stay" | "first", dir: number): void {
+  const el = root();
+  const keepScroll = kind === "stay";
+  const y = el.scrollTop;
+  const apply = (anim: string) => {
+    el.innerHTML = html;
+    const screen = el.querySelector(".screen");
+    if (screen) {
+      if (anim === "static") screen.classList.add("screen--static");
+      else if (anim) screen.classList.add(anim);
+    }
+    el.scrollTop = keepScroll ? y : 0;
+  };
+  paintedTab = tab;
+  if (kind === "first") return apply("");
+  if (kind === "stay") return apply("screen--static");
+  const doc = document as Document & { startViewTransition?: (cb: () => void) => { finished: Promise<void> } };
+  if (doc.startViewTransition && !prefersReducedMotion()) {
+    const html5 = document.documentElement;
+    html5.dataset.vt = dir >= 0 ? "fwd" : "back";
+    try {
+      const t = doc.startViewTransition(() => apply("screen--vt"));
+      t.finished.then(() => { delete html5.dataset.vt; }, () => { delete html5.dataset.vt; });
+      return;
+    } catch (e) { delete html5.dataset.vt; }
+  }
+  apply(dir >= 0 ? "screen--from-right" : "screen--from-left");
+}
+
 async function loadTab(tab: TabId): Promise<void> {
   if (loginMode) {
     loginMode = false;
     const tabbar = document.getElementById("tabbar");
     if (tabbar) tabbar.hidden = false;
   }
-  showTabLoading(tab === "schedule" ? 2 : 3);
-  try {
-    if (tab === "home" || tab === "attendance") {
-      const d = await api<HomeData>("/home");
-      if (d.error) return void (root().innerHTML = noAccess());
-      profile = d.employee;
-      applyTheme(profile.theme);
-      buildTabBar();
-      root().innerHTML = tab === "home" ? renderHome(d) : renderAttendance(d);
-    } else if (tab === "schedule") {
-      const d = await api<ScheduleData>("/schedule?month=" + calendarMonth);
-      if (d.error) return void (root().innerHTML = noAccess());
-      root().innerHTML = renderSchedule(d);
-    } else if (tab === "salary") {
-      const d = await api<SalaryData>("/salary?month=" + salaryMonth + (salaryView ? "&view=" + salaryView : ""));
-      if (d.error) return void (root().innerHTML = noAccess());
-      salaryMonth = d.month;
-      salaryView = d.view;
-      root().innerHTML = renderSalary(d);
-    } else if (tab === "analytics") {
-      if (!profile) {
-        const me = await api<{ employee: Employee; error?: string }>("/me");
-        if (!me.employee) return void (root().innerHTML = noAccess());
-        profile = me.employee;
-      }
-      if (!canAnalytics(profile)) return void (root().innerHTML = errorState("Раздел доступен менеджеру и финансовому директору."));
-      await loadAnalytics();
-    } else {
-      const d = profile ? { employee: profile } : await api<{ employee: Employee; error?: string }>("/me");
-      if (!d.employee) return void (root().innerHTML = noAccess());
-      profile = d.employee;
-      applyTheme(profile.theme);
-      root().innerHTML = renderMore(d.employee);
-    }
-  } catch (err) {
-    root().innerHTML = errorState("Не удалось загрузить данные. Проверьте связь.");
-    try { tg.HapticFeedback.notificationOccurred("error"); } catch (e) { /* ignore */ }
+  const seq = ++tabSeq;
+  const key = tabKey(tab);
+  const sameTab = paintedTab === tab;
+  const dir = sameTab ? 0 : TAB_ORDER.indexOf(tab) >= TAB_ORDER.indexOf(paintedTab || "home") ? 1 : -1;
+  const kind: "switch" | "stay" | "first" = paintedTab === null ? "first" : sameTab ? "stay" : "switch";
+  const cached = tabCache[key];
+
+  // Instant paint from cache, then refresh in the background without replaying animations.
+  if (cached !== undefined && kind !== "stay") {
+    paintTab(tab, cached, kind, dir);
+    const r = await requestTab(tab);
+    if (seq !== tabSeq || !r.ok || r.html === cached) return;
+    paintTab(tab, r.html, "stay", 0);
+    return;
   }
+
+  // Nothing cached: keep the current screen until data arrives (no skeleton flash).
+  // Only the very first paint, or a long wait, shows a skeleton.
+  let skeletonTimer = 0;
+  if (kind === "first") showTabLoading(tab === "schedule" ? 2 : 3);
+  else skeletonTimer = window.setTimeout(() => { if (seq === tabSeq) showTabLoading(tab === "schedule" ? 2 : 3); }, 450);
+  const result = await requestTab(tab);
+  window.clearTimeout(skeletonTimer);
+  if (seq !== tabSeq) return;
+  if (!result.ok) {
+    root().innerHTML = result.html;
+    try { tg.HapticFeedback.notificationOccurred("error"); } catch (e) { /* ignore */ }
+    paintedTab = null;
+    return;
+  }
+  paintTab(tab, result.html, kind === "first" ? "first" : kind, dir);
+  if (kind === "first") prefetchAll();
 }
 
 function closeOverlay(): void {
@@ -837,6 +959,9 @@ function setTab(tab: TabId): void {
   document.querySelectorAll<HTMLElement>(".tab").forEach((el) => {
     el.classList.toggle("tab--active", el.dataset.tab === (tab === "analytics" ? "more" : tab));
   });
+  document.querySelectorAll<HTMLElement>(".side-link").forEach((el) => {
+    el.classList.toggle("side-link--on", el.dataset.action === "tab:" + tab);
+  });
   haptic("light");
   void loadTab(tab);
 }
@@ -848,14 +973,53 @@ function shiftMonth(delta: number): void {
   void loadTab("schedule");
 }
 
+/** Laptop sidebar: brand, role shortcuts and the signed-in person. Hidden on phones by CSS. */
+function sideExtras(): { top: string; bottom: string } {
+  const e = profile;
+  const links: { icon: string; title: string; action: string }[] = [];
+  if (e && isMgr(e)) {
+    links.push({ icon: "calendar", title: "График для команды", action: "team-schedule" });
+    links.push({ icon: "analytics", title: "Аналитика", action: "tab:analytics" });
+    links.push({ icon: "user", title: "Команда", action: "team" });
+    links.push({ icon: "user", title: "Добавить сотрудника", action: "staff" });
+    links.push({ icon: "book", title: "Прогресс обучения", action: "learn-report:trainings" });
+    links.push({ icon: "check", title: "Отчёт по чек-листам", action: "learn-report:checklists" });
+    if (e.perms && e.perms.branches) links.push({ icon: "branch", title: "Филиалы", action: "branches" });
+  } else if (e && canLead(e)) {
+    links.push({ icon: "calendar", title: "График для команды", action: "team-schedule" });
+    if (canAnalytics(e)) links.push({ icon: "analytics", title: "Аналитика", action: "tab:analytics" });
+    if (e.perms && e.perms.branches) links.push({ icon: "branch", title: "Филиалы", action: "branches" });
+  }
+  if (e) {
+    links.push({ icon: "news", title: "Объявления", action: "announcements" });
+    links.push({ icon: "book", title: "Обучение", action: "trainings" });
+    links.push({ icon: "check", title: "Чек-листы", action: "checklists" });
+  }
+  const top = '<div class="side-brand"><span class="side-logo">' + icon("home") + '</span><span class="side-brand-text">Рабочее место<small>Персонал ресторана</small></span></div>';
+  const mid = links.length
+    ? '<div class="side-sep">Разделы</div>' + links.map((l) => `<button type="button" class="side-link" data-action="${l.action}">${icon(l.icon)}<span>${esc(l.title)}</span></button>`).join("")
+    : "";
+  const bottom = e
+    ? `<div class="side-user">${avatar(e.name)}<div class="side-user-text"><b>${esc(e.name)}</b><small>${esc((e.role !== "waiter" && e.role_title) ? e.role_title : e.position)}</small></div></div>`
+    : "";
+  return { top, bottom: mid + bottom };
+}
+
 function buildTabBar(): void {
   const bar = document.getElementById("tabbar") as HTMLElement;
-  bar.innerHTML = TABS.map(
+  const extras = sideExtras();
+  bar.innerHTML = extras.top + '<div class="tab-group">' + TABS.map(
     (t) =>
       `<button class="tab${(t.id === activeTab || t.id === "more" && activeTab === "analytics") ? " tab--active" : ""}" data-tab="${t.id}">` +
       `${icon(t.icon)}<span>${t.label}</span></button>`
-  ).join("");
+  ).join("") + "</div>" + extras.bottom;
+  bar.onpointerdown = (ev) => {
+    const btn = (ev.target as HTMLElement).closest<HTMLElement>(".tab");
+    if (btn && btn.dataset.tab) prefetchTab(btn.dataset.tab as TabId);
+  };
   bar.onclick = (ev) => {
+    const link = (ev.target as HTMLElement).closest<HTMLElement>(".side-link");
+    if (link && link.dataset.action) { haptic("light"); handleAction(link.dataset.action); return; }
     const btn = (ev.target as HTMLElement).closest<HTMLElement>(".tab");
     if (btn && btn.dataset.tab) setTab(btn.dataset.tab as TabId);
   };

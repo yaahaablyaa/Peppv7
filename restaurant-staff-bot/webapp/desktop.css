@@ -1,0 +1,166 @@
+/* ==========================================================================
+   Laptop / desktop layout (>= 900px): sidebar navigation, wide grids.
+   Phones keep the bottom tab bar; this file only acts on wide screens.
+   ========================================================================== */
+
+.side-brand, .side-sep, .side-link, .side-user, .tab-group { display: contents; }
+.side-brand, .side-sep, .side-link, .side-user { display: none; }
+
+@media (min-width: 900px) {
+  :root { --side-w: 272px; --content-w: 1180px; --gutter: 40px; }
+
+  body { background: var(--bg); }
+
+  /* ---------- sidebar ---------- */
+  .tabbar, body.is-fullscreen .tabbar {
+    position: fixed; top: 0; bottom: 0; left: 0; right: auto; width: var(--side-w); max-width: none; height: auto; margin: 0;
+    display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 22px 14px 16px; overflow-y: auto;
+    border: 0; border-right: .5px solid var(--border); border-radius: 0;
+    background: var(--glass); backdrop-filter: blur(30px) saturate(1.8); -webkit-backdrop-filter: blur(30px) saturate(1.8);
+    box-shadow: none; transform: none; animation: side-in .55s var(--ease) both; z-index: 20;
+  }
+  @keyframes side-in { from { opacity: 0; transform: translateX(-18px); } to { opacity: 1; transform: none; } }
+  .tabbar[hidden] { display: none; }
+  .tab-group { display: flex; flex-direction: column; gap: 2px; }
+  .side-brand { display: flex; align-items: center; gap: 12px; margin: 0 6px 22px; }
+  .side-logo { display: grid; width: 40px; height: 40px; flex: none; place-items: center; border-radius: 12px; color: #fff; background: linear-gradient(135deg, #ff453a, #ff2d55); box-shadow: 0 8px 18px -8px rgba(255, 59, 48, .8); }
+  .side-logo svg { width: 22px; height: 22px; }
+  .side-brand-text { display: flex; flex-direction: column; font-size: 17px; font-weight: 750; letter-spacing: -.03em; line-height: 1.15; }
+  .side-brand-text small { margin-top: 2px; font-size: 12px; font-weight: 500; letter-spacing: 0; color: var(--text-muted); }
+
+  .tab, .side-link {
+    position: relative; display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 12px;
+    width: 100%; height: 42px; min-height: 42px; padding: 0 12px; border: 0; border-radius: 11px; background: transparent;
+    color: var(--text-secondary); font-size: 15px; font-weight: 550; letter-spacing: -.015em; text-align: left; cursor: pointer;
+    transition: background .18s, color .18s, transform .25s var(--spring);
+  }
+  .tab::before { display: none; }
+  .tab svg, .side-link svg { width: 21px; height: 21px; flex: none; transform: none; }
+  .tab span, .side-link span { font-size: 15px; font-weight: 550; }
+  .tab:hover, .side-link:hover { background: var(--fill); color: var(--text); }
+  .tab:active, .side-link:active { transform: scale(.97); }
+  .tab--active, .side-link--on { background: var(--accent-soft); color: var(--accent); }
+  .tab--active::after { content: ""; position: absolute; left: -14px; top: 9px; bottom: 9px; width: 3.5px; border-radius: 0 4px 4px 0; background: var(--accent); animation: bar-in .35s var(--spring) both; }
+  @keyframes bar-in { from { transform: scaleY(.3); opacity: 0; } to { transform: none; opacity: 1; } }
+  .tab--active svg { transform: none; }
+  .side-sep { display: block; margin: 20px 12px 6px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+  .side-link { display: flex; height: 38px; min-height: 38px; font-weight: 500; }
+  .side-link svg { width: 19px; height: 19px; opacity: .85; }
+  .side-link span { font-size: 14.5px; font-weight: 500; }
+  .side-user { display: flex; align-items: center; gap: 11px; margin: auto 4px 0; padding: 14px 8px 0; border-top: .5px solid var(--separator); }
+  .side-user .avatar { width: 38px; height: 38px; font-size: 14px; }
+  .side-user-text { display: flex; min-width: 0; flex-direction: column; }
+  .side-user-text b { overflow: hidden; font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+  .side-user-text small { overflow: hidden; font-size: 12px; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+  .side-user:first-child { margin-top: auto; }
+  .side-sep + .side-link ~ .side-sep { display: none; }
+
+  /* ---------- content area ---------- */
+  /* #app is the scroll container: pin it next to the sidebar */
+  .app.scroll-content, body.is-fullscreen .app.scroll-content {
+    position: fixed; top: 0; right: 0; bottom: 0; left: var(--side-w); width: auto; max-width: none; margin: 0;
+    padding: 34px var(--gutter) 56px; overflow-x: hidden; overflow-y: auto; transform: none;
+    -webkit-mask-image: none; mask-image: none;
+  }
+  .scroll-edge { display: none; }
+  .screen { width: 100%; max-width: var(--content-w); margin: 0; }
+  .screen-title { margin: 0 0 4px; font-size: 38px; }
+  .screen-sub { margin: 0 0 26px; font-size: 15px; }
+  .back-link { margin-bottom: 8px; font-size: 16px; }
+  .back-link:hover { opacity: .7; }
+  .section, .hero, .staff-form--card { max-width: none; }
+  .section-title { margin: 30px 4px 10px; }
+  .section-footer { max-width: 760px; margin-left: 4px; }
+
+  /* ---------- hero + stats ---------- */
+  .hero { padding: 26px 28px; }
+  .hero-value { font-size: 42px; }
+  .hero--ring .hero-value { font-size: 34px; }
+  .stat-row, .stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; max-width: none; }
+  .stat-row--manager { grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: none; gap: 14px; }
+  .stat-row:not(.stat-row--manager):not(:has(.stat:nth-child(3))) { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 620px; }
+  .stat { padding: 20px; }
+  .stat-value { font-size: 30px; }
+  .progress-grid { max-width: 620px; gap: 16px; }
+  .pcard { padding: 18px; }
+  .month-nav, .date-nav { max-width: 520px; }
+  .seg { max-width: 440px; }
+  .chips--scroll { flex-wrap: wrap; margin: 0 0 16px; padding: 0; overflow: visible; }
+
+  /* ---------- lists and cards in columns ---------- */
+  .tr-list, .cl-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+  .tr-list > *, .cl-list > * { margin-bottom: 0; }
+  .section--stagger:has(.an-emp) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .section--stagger:has(.an-emp) .an-emp { border-top: 0; border-bottom: .5px solid var(--separator); }
+  .section--stagger:has(.an-emp) .an-emp:nth-child(odd) { border-right: .5px solid var(--separator); }
+  .section--stagger:has(.an-emp) .an-emp:nth-last-child(-n+2) { border-bottom: 0; }
+  .section--stagger:has(.an-branch) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .section--stagger:has(.an-branch) .an-branch:nth-child(odd) { border-right: .5px solid var(--separator); }
+  .section--stagger:has(.an-branch) .an-branch + .an-branch { border-top: 0; }
+  .section--stagger:has(.pe) { display: block; }
+  .rep-card { margin-bottom: 18px; }
+  .bars { height: 230px; gap: 6px; }
+  .chart-card { padding: 22px 22px 14px; }
+  .bar-label { font-size: 11px; }
+
+  /* more / settings: cards side by side */
+  .screen:has(.section-title) > .section:not(.section--stagger) { max-width: 760px; }
+  .screen > .section { max-width: 860px; }
+  .screen > .section--stagger, .screen > .rep-card, .screen > .hero, .screen > .chart-card, .screen > .staff-form { max-width: none; }
+  .screen > .staff-form { max-width: 700px; }
+  .screen > .hero { max-width: 860px; }
+  .screen > .stat-grid, .screen > .stat-row { max-width: none; }
+  .screen > .chart-card { max-width: none; }
+
+  /* ---------- schedule screens ---------- */
+  .cal { max-width: 560px; }
+  .screen > .cal { margin-right: auto; }
+  .team-schedule-screen, .team-table-card { max-width: none; }
+  .team-schedule-toolbar, .team-schedule-actions { max-width: 640px; margin-left: 0; margin-right: 0; }
+  .team-table-card { border-radius: 20px; }
+  .team-shift { min-height: 56px; font-size: 13px; transition: transform .2s var(--spring), background .15s; }
+  .team-shift:not(:disabled):hover { transform: scale(1.06); }
+  .team-cell-form, .staff-form { max-width: 700px; }
+  .team-table { width: 100%; min-width: 100%; }
+  .team-shift { width: 100%; min-width: 58px; }
+  .team-name-head, .team-name { width: 200px; min-width: 200px; }
+
+  /* home: two balanced columns */
+  .screen--home { column-count: 2; column-gap: 32px; }
+  .screen--home > * { break-inside: avoid; max-width: none !important; }
+  .screen--home > .screen-title, .screen--home > .screen-sub { column-span: all; }
+  .screen--home > .progress-grid, .screen--home > .stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .screen--home > .stat-row--manager { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .screen--home .hero-value { font-size: 36px; }
+
+  /* ---------- hover feedback ---------- */
+  .cell--tappable, .pe-head, .an-branch, .pcard { cursor: pointer; }
+  .cell--tappable:hover, .pe-head:hover, .an-branch:hover { background: var(--fill); }
+  .pcard:hover, .tr-card:hover, .cl-card:hover { transform: translateY(-2px); }
+  .tr-card, .cl-card, .pcard { transition: transform .3s var(--spring), box-shadow .3s; }
+  .tr-card:hover, .cl-card:hover { box-shadow: 0 14px 34px -18px rgba(0, 0, 0, .35); }
+  .button:hover:not(:disabled) { filter: brightness(1.06); }
+  .nav-arrow:hover { background: var(--fill); }
+  .checklist-item:hover { background: var(--fill); border-radius: 10px; }
+
+  /* ---------- subtler tab transition on wide screens ---------- */
+  @keyframes vt-out-left { to { transform: translateX(-36px); opacity: 0; } }
+  @keyframes vt-in-right { from { transform: translateX(48px); opacity: 0; } }
+  @keyframes vt-out-right { to { transform: translateX(36px); opacity: 0; } }
+  @keyframes vt-in-left { from { transform: translateX(-48px); opacity: 0; } }
+  @keyframes tab-from-right { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: none; } }
+  @keyframes tab-from-left { from { opacity: 0; transform: translateX(-30px); } to { opacity: 1; transform: none; } }
+}
+
+/* wide laptops and desktops: keep the layout airy */
+@media (min-width: 1500px) {
+  :root { --content-w: 1320px; --side-w: 288px; }
+}
+/* small laptops */
+@media (min-width: 900px) and (max-width: 1180px) {
+  :root { --side-w: 232px; --gutter: 28px; }
+  .tr-list, .cl-list { grid-template-columns: 1fr; }
+  .screen--home { column-count: 1; }
+  .stat-row, .stat-grid, .stat-row--manager { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .side-brand-text small { display: none; }
+}
