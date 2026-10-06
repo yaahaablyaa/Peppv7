@@ -26,6 +26,7 @@ let teamScheduleData: TeamScheduleData | null = null;
 let selectedTeamCell: { employeeId: number; date: string } | null = null;
 let loginMode = false;
 let branchesMode = false;
+let inventoryMode = false;
 let salaryMonth = uzbekistanToday().slice(0, 7);
 let salaryView: "p1" | "p2" | "full" | "" = "";
 
@@ -61,9 +62,10 @@ function renderHome(d: HomeData): string {
     ? "Приход ещё не отмечен"
     : "Отдыхайте";
 
-  let html = '<div class="screen screen--home">';
+  let html = '<div class="screen screen--wide">';
   html += `<div class="screen-title">Привет, ${esc(d.employee.name.split(" ")[0])}</div>`;
   html += `<div class="screen-sub">${humanDate(t.date)} · ${esc(d.employee.position)}</div>`;
+  html += '<div class="cols"><div class="col">';
 
   if (d.manager_summary) {
     const s = d.manager_summary;
@@ -89,6 +91,7 @@ function renderHome(d: HomeData): string {
     `<div class="stat"><div class="stat-value">${money(d.salary.amount)}</div><div class="stat-label">Начислено</div></div>` +
     "</div>";
 
+  html += '</div><div class="col">';
   if (d.progress) {
     const pt = d.progress.trainings;
     const pc = d.progress.checklists;
@@ -104,6 +107,7 @@ function renderHome(d: HomeData): string {
   html += cell({ icon: "book", title: "Обучение", value: String(d.counts.trainings), tappable: true, action: "trainings" });
   html += cell({ icon: "check", title: "Чек-листы", value: String(d.counts.checklists), tappable: true, action: "checklists" });
   if (canAnalytics(d.employee)) html += cell({ icon: "analytics", title: "Аналитика", subtitle: "Периоды и показатели команды", tappable: true, action: "tab:analytics" });
+  if (canLead(d.employee)) html += cell({ icon: "box", title: "Инвентаризация", subtitle: d.inventory_low ? "Заканчивается: " + d.inventory_low : "Остатки и пересчёт", value: d.inventory_low ? String(d.inventory_low) : "", tappable: true, action: "inventory" });
   if (canLead(d.employee) && !isMgr(d.employee)) html += cell({ icon: "calendar", title: "График для команды", subtitle: "Смены вашего отдела", tappable: true, action: "team-schedule" });
   html += "</div>";
 
@@ -130,7 +134,7 @@ function renderHome(d: HomeData): string {
     html += "</div>";
   }
 
-  return html + "</div>";
+  return html + "</div></div></div>";
 }
 
 /* ---------------------------------------------------------------- График */
@@ -147,8 +151,8 @@ function renderSchedule(d: ScheduleData): string {
   const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
   const todayIso = uzbekistanToday();
 
-  let html = '<div class="screen"><div class="screen-title">Мой график</div>';
-  html += '<div class="screen-sub">Личные смены и выходные</div>';
+  let html = '<div class="screen screen--wide"><div class="screen-title">Мой график</div>';
+  html += '<div class="screen-sub">Личные смены и выходные</div><div class="cols"><div class="col">';
   html += '<div class="month-nav"><button class="nav-arrow" data-action="month:prev" type="button" aria-label="Предыдущий месяц"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
     `<div class="month-name">${MONTHS[month - 1]} ${year}</div>` +
     '<button class="nav-arrow" data-action="month:next" type="button" aria-label="Следующий месяц"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>';
@@ -166,7 +170,7 @@ function renderSchedule(d: ScheduleData): string {
     const dot = s && !s.is_day_off && s.start_time ? `<span class="cal-dot">${shortTime(s.start_time)}</span>` : "";
     html += `<div class="${cls}">${day}${dot}</div>`;
   }
-  html += "</div></div>";
+  html += "</div></div></div><div class=\"col\">";
 
   const upcoming = d.shifts.filter((s) => s.date >= todayIso);
   html += '<div class="section-title">Ближайшие дни</div><div class="section">';
@@ -184,7 +188,7 @@ function renderSchedule(d: ScheduleData): string {
   }
   html += "</div>";
   html += '<div class="section-footer">График составляет менеджер. При изменениях вам придёт уведомление в бот.</div>';
-  return html + "</div>";
+  return html + "</div></div></div>";
 }
 
 /* ---------------------------------------------------------------- Приход */
@@ -222,13 +226,14 @@ function renderSalary(d: SalaryData): string {
   const periodLabels: Record<string, string> = { p1: "1–15 число", p2: "16 — конец месяца", full: "Весь месяц" };
   const months = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
   const [yy, mm] = d.month.split("-");
-  let html = '<div class="screen"><div class="screen-title">Зарплата</div>';
-  html += `<div class="screen-sub">Ставка ${money(d.rate)} в час</div>`;
+  let html = '<div class="screen screen--wide"><div class="screen-title">Зарплата</div>';
+  html += `<div class="screen-sub">Ставка ${money(d.rate)} в час</div><div class="cols"><div class="col"><div class="toolbar">`;
   const atCurrent = d.month >= d.current_month;
   html += '<div class="month-nav"><button class="nav-arrow" data-action="salary-month:-1" type="button" aria-label="Предыдущий месяц"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
     `<div class="month-name">${months[Number(mm) - 1]} ${yy}</div>` +
     `<button class="nav-arrow" data-action="salary-month:1" type="button" aria-label="Следующий месяц"${atCurrent ? " disabled" : ""}><svg viewBox="0 0 24 24" width="20" height="20"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>`;
   html += segmented("salary", [{ id: "p1", label: "1–15" }, { id: "p2", label: "16–конец" }, { id: "full", label: "Месяц" }], d.view, "salary-view:");
+  html += "</div>";
 
   const payoutLine = d.period.payout ? ` · выплата ${humanDate(d.period.payout)}` : "";
   html += `<div class="hero hero--grad"><div class="hero-label">${periodLabels[d.view]} · ${humanDate(d.period.start)} — ${humanDate(d.period.end)}</div>` +
@@ -254,7 +259,7 @@ function renderSalary(d: SalaryData): string {
       "</div></div></div>";
   }
 
-  html += '<div class="section-title">История смен</div><div class="section section--stagger">';
+  html += '</div><div class="col"><div class="section-title">История смен</div><div class="section section--stagger">';
   if (!d.shifts.length) {
     html += '<div class="empty">В этом периоде отработанных смен пока нет</div>';
   } else {
@@ -271,13 +276,13 @@ function renderSalary(d: SalaryData): string {
   }
   html += "</div>";
   html += '<div class="section-footer">Расчёт по фактически отработанному времени. Два периода в месяц: с 1 по 15 число — выплата 25-го числа этого же месяца; с 16 числа по конец месяца — выплата 10-го числа следующего месяца.</div>';
-  return html + "</div>";
+  return html + "</div></div></div>";
 }
 
 /* ------------------------------------------------------------------ Ещё */
 
 function renderMore(e: Employee): string {
-  let html = '<div class="screen"><div class="screen-title">Ещё</div>';
+  let html = '<div class="screen screen--wide"><div class="screen-title">Ещё</div><div class="cols"><div class="col">';
   html += '<div class="section">';
   html += cell({ icon: "user", title: e.name, subtitle: `${e.role_title && e.role !== "waiter" ? e.role_title : e.position} · ${e.phone}` });
   html += "</div>";
@@ -290,18 +295,20 @@ function renderMore(e: Employee): string {
     html += cell({ icon: "analytics", title: "Аналитика", subtitle: "Периоды 1–15, 16–конец и весь месяц", tappable: true, action: "tab:analytics" });
     html += cell({ icon: "book", title: "Прогресс обучения", subtitle: "Кто что изучил", tappable: true, action: "learn-report:trainings" });
     html += cell({ icon: "check", title: "Отчёт по чек-листам", subtitle: "Кто и что выполнил", tappable: true, action: "learn-report:checklists" });
+    html += cell({ icon: "box", title: "Инвентаризация", subtitle: "Остатки, приход, списание, пересчёт", tappable: true, action: "inventory" });
     if (e.perms && e.perms.branches) html += cell({ icon: "branch", title: "Филиалы", subtitle: "Список и добавление филиалов", tappable: true, action: "branches" });
     html += "</div>";
   } else if (canLead(e)) {
-    const scopeText: Record<string, string> = { chef: "Вы составляете график для поваров", bar_manager: "Вы составляете график для барист и барменов", finance: "Вы видите график всех, составляете график для кассиров" };
+    const scopeText: Record<string, string> = { chef: "Вы составляете график для поваров", bar_manager: "Вы составляете график для барист", finance: "Вы видите график всех, составляете график для кассиров" };
     html += '<div class="section-title">Управление</div><div class="section">';
     html += cell({ icon: "calendar", title: "График для команды", subtitle: scopeText[e.role] || "График сотрудников", tappable: true, action: "team-schedule" });
     if (canAnalytics(e)) html += cell({ icon: "analytics", title: "Аналитика", subtitle: "По всем филиалам и периодам месяца", tappable: true, action: "tab:analytics" });
+    html += cell({ icon: "box", title: "Инвентаризация", subtitle: e.role === "finance" ? "Остатки и отчёты по пересчётам" : "Остатки и пересчёт вашего отдела", tappable: true, action: "inventory" });
     if (e.perms && e.perms.branches) html += cell({ icon: "branch", title: "Филиалы", subtitle: "Список и добавление филиалов", tappable: true, action: "branches" });
     html += "</div>";
   }
 
-  html += '<div class="section-title">Работа</div><div class="section">';
+  html += '</div><div class="col"><div class="section-title">Работа</div><div class="section">';
   html += cell({ icon: "news", title: "Объявления", subtitle: "Новости для команды", tappable: true, action: "announcements" });
   html += cell({ icon: "book", title: "Обучение", subtitle: "Материалы и мой прогресс", tappable: true, action: "trainings" });
   html += cell({ icon: "check", title: "Чек-листы", tappable: true, action: "checklists" });
@@ -314,7 +321,7 @@ function renderMore(e: Employee): string {
   html += cell({ icon: "settings", title: "Тема", value: themeLabels[e.theme] || "Как в Telegram", tappable: true, action: "theme" });
   html += cell({ icon: "exit", title: "Выход", tappable: true, action: "logout" });
   html += "</div>";
-  return html + "</div>";
+  return html + "</div></div></div>";
 }
 
 function renderAnnouncements(d: AnnouncementsData): string {
@@ -604,7 +611,7 @@ function renderTeamSchedule(d: TeamScheduleData): string {
 /* --------------------------------------------------------------- Роутер */
 
 function setOverlayControls(_visible: boolean): void {
-  const isSubscreen = !loginMode && (activeTab === "analytics" || staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode);
+  const isSubscreen = !loginMode && (activeTab === "analytics" || staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode);
   document.body.classList.remove("has-main-button");
   document.body.classList.remove("has-native-back");
   try {
@@ -630,6 +637,107 @@ async function loadStaff(): Promise<void> {
     root().innerHTML = errorState("Не удалось загрузить сотрудников. Проверьте связь.");
     try { tg.HapticFeedback.notificationOccurred("error"); } catch (e) { /* ignore */ }
   }
+}
+
+
+/* ---- swipe between tabs (touch screens): the screen follows the finger, release commits ---- */
+
+function swipeAllowed(): boolean {
+  if (loginMode || document.querySelector(".dlg-back")) return false;
+  if (staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode) return false;
+  return TABS.some((t) => t.id === activeTab);
+}
+
+/** True when the touch started inside something that scrolls sideways or takes input. */
+function swipeBlocked(target: EventTarget | null): boolean {
+  let el = target as HTMLElement | null;
+  while (el && el !== root() && el !== document.body) {
+    const tag = el.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+    if (el.scrollWidth > el.clientWidth + 2) {
+      const ox = window.getComputedStyle(el).overflowX;
+      if (ox === "auto" || ox === "scroll") return true;
+    }
+    el = el.parentElement;
+  }
+  return false;
+}
+
+function initSwipe(): void {
+  const el = root();
+  const order = TABS.map((t) => t.id);
+  let startX = 0, startY = 0, startT = 0, dx = 0;
+  let mode: "idle" | "pending" | "drag" | "ignore" = "idle";
+  let screen: HTMLElement | null = null;
+
+  const reset = (animate: boolean) => {
+    if (!screen) return;
+    const node = screen;
+    if (animate) {
+      node.style.transition = "transform .32s cubic-bezier(.34,1.36,.5,1), opacity .25s ease";
+      node.style.transform = "";
+      node.style.opacity = "";
+      window.setTimeout(() => { node.style.transition = ""; }, 340);
+    } else {
+      node.style.transition = "";
+      node.style.transform = "";
+      node.style.opacity = "";
+    }
+    screen = null;
+  };
+
+  el.addEventListener("touchstart", (e) => {
+    mode = "idle";
+    if (e.touches.length !== 1 || !swipeAllowed()) return;
+    const t = e.touches[0];
+    if (t.clientX < 24 || t.clientX > window.innerWidth - 24) return; // leave system edge gestures alone
+    if (swipeBlocked(e.target)) { mode = "ignore"; return; }
+    startX = t.clientX; startY = t.clientY; startT = Date.now(); dx = 0;
+    mode = "pending";
+  }, { passive: true });
+
+  el.addEventListener("touchmove", (e) => {
+    if (mode !== "pending" && mode !== "drag") return;
+    const t = e.touches[0];
+    const mx = t.clientX - startX;
+    const my = t.clientY - startY;
+    if (mode === "pending") {
+      if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
+      if (Math.abs(my) > Math.abs(mx) * 0.9) { mode = "ignore"; return; }
+      mode = "drag";
+      screen = el.querySelector<HTMLElement>(".screen");
+      if (screen) { screen.classList.add("screen--static"); screen.style.willChange = "transform"; }
+    }
+    dx = mx;
+    if (!screen) return;
+    const i = order.indexOf(activeTab);
+    const blocked = (dx < 0 && i >= order.length - 1) || (dx > 0 && i <= 0);
+    const eased = blocked ? dx * 0.18 : dx * 0.55;
+    screen.style.transform = `translate3d(${eased}px,0,0)`;
+    screen.style.opacity = String(1 - Math.min(Math.abs(eased) / 420, 0.4));
+  }, { passive: true });
+
+  const finish = () => {
+    if (mode !== "drag") { mode = "idle"; return; }
+    mode = "idle";
+    const i = order.indexOf(activeTab);
+    const fast = Date.now() - startT < 350 && Math.abs(dx) > 40;
+    const far = Math.abs(dx) > window.innerWidth * 0.22;
+    const next = dx < 0 ? i + 1 : i - 1;
+    if ((far || fast) && next >= 0 && next < order.length) {
+      const node = screen;
+      setTab(order[next]);
+      // If the new tab has to load first, slide the old screen back meanwhile.
+      window.setTimeout(() => {
+        if (node && node.isConnected && !document.documentElement.dataset.vt) { screen = node; reset(true); }
+      }, 140);
+      screen = null;
+      return;
+    }
+    reset(true);
+  };
+  el.addEventListener("touchend", finish, { passive: true });
+  el.addEventListener("touchcancel", () => { if (mode === "drag") reset(true); mode = "idle"; }, { passive: true });
 }
 
 function showTabLoading(blocks: number): void {
@@ -805,6 +913,7 @@ async function loadTab(tab: TabId): Promise<void> {
 }
 
 function closeOverlay(): void {
+  if (inventoryMode && invBack()) return;
   if (activeTab === "analytics") {
     setTab("more");
     return;
@@ -813,7 +922,7 @@ function closeOverlay(): void {
     openTeam();
     return;
   }
-  if (!staffMode && !teamScheduleMode && !announcementsMode && !checklistsMode && !trainingsMode && !applicationsMode && !branchesMode) return;
+  if (!staffMode && !teamScheduleMode && !announcementsMode && !checklistsMode && !trainingsMode && !applicationsMode && !branchesMode && !inventoryMode) return;
   staffMode = false;
   staffScreen = "add";
   selectedStaffId = null;
@@ -823,6 +932,7 @@ function closeOverlay(): void {
   trainingsMode = false;
   applicationsMode = false;
   branchesMode = false;
+  inventoryMode = false;
   trainingsData = null;
   setOverlayControls(false);
   void loadTab("more");
@@ -943,7 +1053,7 @@ function openTeamSchedule(): void {
 }
 
 function setTab(tab: TabId): void {
-  if (staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode) {
+  if (staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode) {
     staffMode = false;
     staffScreen = "add";
     selectedStaffId = null;
@@ -953,6 +1063,7 @@ function setTab(tab: TabId): void {
     trainingsMode = false;
     applicationsMode = false;
     branchesMode = false;
+    inventoryMode = false;
   }
   activeTab = tab;
   setOverlayControls(false);
@@ -984,10 +1095,12 @@ function sideExtras(): { top: string; bottom: string } {
     links.push({ icon: "user", title: "Добавить сотрудника", action: "staff" });
     links.push({ icon: "book", title: "Прогресс обучения", action: "learn-report:trainings" });
     links.push({ icon: "check", title: "Отчёт по чек-листам", action: "learn-report:checklists" });
+    links.push({ icon: "box", title: "Инвентаризация", action: "inventory" });
     if (e.perms && e.perms.branches) links.push({ icon: "branch", title: "Филиалы", action: "branches" });
   } else if (e && canLead(e)) {
     links.push({ icon: "calendar", title: "График для команды", action: "team-schedule" });
     if (canAnalytics(e)) links.push({ icon: "analytics", title: "Аналитика", action: "tab:analytics" });
+    links.push({ icon: "box", title: "Инвентаризация", action: "inventory" });
     if (e.perms && e.perms.branches) links.push({ icon: "branch", title: "Филиалы", action: "branches" });
   }
   if (e) {
@@ -1385,7 +1498,7 @@ async function removeStaffQr(employeeId: number): Promise<void> {
 function handleAction(action: string): void {
   if (action.indexOf("tab:") === 0) return setTab(action.slice(4) as TabId);
   if (action === "analytics-back") return setTab("more");
-  if (handleBranchesAction(action)) return;
+  if (handleBranchesAction(action) || handleInventoryAction(action)) return;
   if (handleAnalyticsAction(action) || handleLearningAction(action)) return;
   if (action.indexOf("learn-report:") === 0) return openLearningReport(action.slice(13) as "trainings" | "checklists");
   if (action.indexOf("salary-view:") === 0) {
@@ -1407,7 +1520,7 @@ function handleAction(action: string): void {
   }
   if (action === "month:prev") return shiftMonth(-1);
   if (action === "month:next") return shiftMonth(1);
-  if (action === "retry") return void (staffMode ? (staffScreen === "team" ? loadTeam() : staffScreen === "edit" && selectedStaffId ? loadTeamEdit(selectedStaffId) : loadStaff()) : teamScheduleMode ? openTeamSchedule() : announcementsMode ? loadAnnouncements() : checklistsMode ? loadChecklists() : trainingsMode ? loadTrainings() : branchesMode ? loadBranches() : loadTab(activeTab));
+  if (action === "retry") return void (staffMode ? (staffScreen === "team" ? loadTeam() : staffScreen === "edit" && selectedStaffId ? loadTeamEdit(selectedStaffId) : loadStaff()) : teamScheduleMode ? openTeamSchedule() : announcementsMode ? loadAnnouncements() : checklistsMode ? loadChecklists() : trainingsMode ? loadTrainings() : branchesMode ? loadBranches() : inventoryMode ? loadInventory() : loadTab(activeTab));
   if (action === "staff") return openStaff();
   if (action === "team") return openTeam();
   if (action === "team-back") return closeOverlay();
@@ -1503,6 +1616,8 @@ function syncFullscreenLayoutLater(): void {
 }
 
 function boot(): void {
+  installDialogs();
+  initSwipe();
   try {
     let queued = false;
     new MutationObserver(() => {

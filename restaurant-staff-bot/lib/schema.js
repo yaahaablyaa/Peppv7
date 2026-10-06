@@ -176,9 +176,67 @@ function init(db, log) {
   const correctedAttendance = require("./attendance").recalculateClosedRows(db);
   if (correctedAttendance) log.info(`Recalculated worked minutes for ${correctedAttendance} attendance records`);
 
+  // Inventory: items, movements journal, counts (инвентаризация) with per-item lines.
+  db.run(`CREATE TABLE IF NOT EXISTS inventory_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER NOT NULL DEFAULT 1,
+    department TEXT NOT NULL,
+    name TEXT NOT NULL,
+    unit TEXT NOT NULL DEFAULT 'шт',
+    qty REAL NOT NULL DEFAULT 0,
+    min_qty REAL NOT NULL DEFAULT 0,
+    unit_cost REAL NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS inventory_moves (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL,
+    branch_id INTEGER NOT NULL DEFAULT 1,
+    kind TEXT NOT NULL,
+    qty REAL NOT NULL,
+    balance REAL NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    employee_id INTEGER,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS inventory_counts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER NOT NULL DEFAULT 1,
+    department TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    started_by INTEGER,
+    started_at TEXT DEFAULT (datetime('now')),
+    finished_by INTEGER,
+    finished_at TEXT,
+    shortage REAL NOT NULL DEFAULT 0,
+    surplus REAL NOT NULL DEFAULT 0,
+    diff_items INTEGER NOT NULL DEFAULT 0,
+    counted_items INTEGER NOT NULL DEFAULT 0
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS inventory_count_lines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    count_id INTEGER NOT NULL,
+    item_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    unit TEXT NOT NULL,
+    expected REAL NOT NULL DEFAULT 0,
+    actual REAL,
+    unit_cost REAL NOT NULL DEFAULT 0
+  )`);
+  db.run("CREATE INDEX IF NOT EXISTS idx_inventory_items_branch ON inventory_items (branch_id, department)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_inventory_moves_item ON inventory_moves (item_id, id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_inventory_lines_count ON inventory_count_lines (count_id)");
+
   // There is no "Администратор" any more: only "Менеджер".
   db.run("UPDATE employees SET position = 'Менеджер' WHERE position = 'Администратор'");
   db.run("UPDATE employees SET role = 'manager' WHERE role = 'admin'");
+  // Only "Бариста" exists (no separate "Бармен").
+  db.run("UPDATE employees SET position = 'Бариста' WHERE position = 'Бармен'");
+  // Inventory department "Зал" became "Посуда".
+  db.run("UPDATE inventory_items SET department = 'Посуда' WHERE department = 'Зал'");
+  db.run("UPDATE inventory_counts SET department = 'Посуда' WHERE department = 'Зал'");
 
   seedManager(db, log);
   // Promote only the pre-existing account already linked to the approved Telegram identity.

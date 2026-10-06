@@ -10,7 +10,6 @@ const roles = require("./roles");
 /** Preset positions offered to the manager, keyed by callback suffix. */
 const POSITIONS = [
   { key: "waiter", title: "Официант", role: "waiter" },
-  { key: "barman", title: "Бармен", role: "waiter" },
   { key: "barista", title: "Бариста", role: "waiter" },
   { key: "hostess", title: "Хостес", role: "waiter" },
   { key: "cashier", title: "Кассир", role: "waiter" },

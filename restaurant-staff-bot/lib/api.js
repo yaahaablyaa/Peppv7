@@ -8,6 +8,7 @@ const attendance = require("./attendance");
 const registerAnalytics = require("./analytics");
 const registerAnalyticsReport = require("./analytics-report");
 const registerLearning = require("./learning");
+const registerInventory = require("./inventory");
 const { learningProgress } = registerLearning;
 const employees = require("./employees");
 const salary = require("./salary");
@@ -42,6 +43,7 @@ function publicEmployee(emp) {
       analytics: roles.canSeeAnalytics(emp),
       money: roles.canSeeMoney(emp),
       branches: roles.isGlobal(emp),
+      inventory: roles.canUseInventory(emp),
     },
   };
 }
@@ -184,6 +186,7 @@ module.exports = function registerApi(bot, sdk) {
         [emp.id]
       ),
       progress: learningProgress(db, emp, date),
+      inventory_low: registerInventory.lowStock(db, emp),
       counts: {
         trainings: db.get("SELECT COUNT(*) AS c FROM trainings").c,
         checklists: db.get("SELECT COUNT(*) AS c FROM checklists").c,
@@ -644,6 +647,7 @@ module.exports = function registerApi(bot, sdk) {
   });
 
   registerLearning(bot, sdk, { me, isManager, today, NO_ACCESS });
+  registerInventory(bot, sdk, { me, NO_ACCESS });
 
   sdk.miniapp.get("/applications", async (ctx) => {
     const emp = me(ctx);

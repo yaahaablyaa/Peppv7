@@ -160,7 +160,7 @@ function trainingProgressView(p) {
 }
 function renderTrainings(d) {
     const manager = d.can_manage;
-    let html = '<div class="screen"><button class="back-link" data-action="trainings-back">‹ Назад</button><div class="screen-title">Обучение</div>';
+    let html = '<div class="screen screen--wide"><button class="back-link" data-action="trainings-back">‹ Назад</button><div class="screen-title">Обучение</div>';
     html += `<div class="screen-sub">${manager ? "Материалы для команды и прогресс каждого сотрудника." : "Изучайте материалы и отмечайте их — менеджер видит ваш прогресс."}</div>`;
     if (manager) {
         html += segmented("training", [{ id: "list", label: "Материалы" }, { id: "progress", label: "Прогресс" }, { id: "new", label: "Новый" }], trainingTab, "tr-tab:");
@@ -395,7 +395,7 @@ function checklistReportView(r) {
 }
 function renderChecklists(d) {
     const manager = d.can_manage;
-    let html = '<div class="screen"><button class="back-link" data-action="checklists-back">‹ Назад</button><div class="screen-title">Чек-листы</div>';
+    let html = '<div class="screen screen--wide"><button class="back-link" data-action="checklists-back">‹ Назад</button><div class="screen-title">Чек-листы</div>';
     html += `<div class="screen-sub">${manager ? "Создавайте чек-листы и смотрите, кто и что выполнил." : "Отмечайте выполненные задачи — они сохраняются на сегодня."}</div>`;
     if (manager) {
         html += segmented("checklist", [{ id: "report", label: "Отчёт" }, { id: "mine", label: "Мои" }, { id: "new", label: "Новый" }], checklistTab, "cl-tab:");
@@ -673,7 +673,8 @@ function handleLearningAction(action) {
 let branchesData = null;
 function renderBranches(d) {
     let html = '<div class="screen"><button class="back-link" data-action="branches-back">‹ Назад</button><div class="screen-title">Филиалы</div>';
-    html += '<div class="screen-sub">Аналитика сравнивает филиалы между собой.</div><div class="section section--stagger">';
+    html += '<div class="screen-sub">Аналитика сравнивает филиалы между собой.</div>';
+    html += '<div class="section branch-list section--stagger">';
     if (!d.branches.length)
         html += '<div class="empty">Филиалов пока нет</div>';
     d.branches.forEach((b, i) => {
@@ -682,11 +683,12 @@ function renderBranches(d) {
     });
     html += "</div>";
     if (d.can_manage) {
-        html += '<form class="section staff-form staff-form--card" id="branch-form"><div class="staff-form-heading">Новый филиал</div>' +
+        html += '<div class="section-title">Добавить филиал</div>' +
+            '<form class="section staff-form staff-form--card" id="branch-form">' +
             '<label class="field"><span class="field-label">Название</span><input name="name" maxlength="80" placeholder="Например, Филиал Чиланзар" required></label>' +
             '<label class="field"><span class="field-label">Адрес</span><input name="address" maxlength="200" placeholder="Необязательно"></label>' +
             '<button class="button staff-submit" type="submit">Добавить филиал</button></form>' +
-            '<div class="section-footer">При добавлении сотрудника можно выбрать его филиал. Менеджеры видят только свой филиал, владелец и финансовый директор — все.</div>';
+            '<div class="section-footer">При добавлении сотрудника можно выбрать его филиал. Менеджеры видят только свой филиал, владелец и финансовый директор видят все.</div>';
     }
     return html + "</div>";
 }

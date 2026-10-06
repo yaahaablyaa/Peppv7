@@ -19,7 +19,6 @@ const POSITIONS = [
   { title: "Кассир", role: "waiter" },
   { title: "Повар", role: "waiter" },
   { title: "Бариста", role: "waiter" },
-  { title: "Бармен", role: "waiter" },
   { title: "Тех персонал", role: "waiter" },
   { title: "Шеф-повар", role: "chef" },
   { title: "Бар-менеджер", role: "bar_manager" },
@@ -30,7 +29,7 @@ const POSITIONS = [
 /** Positions a department head may schedule (and see). */
 const DEPARTMENT = {
   chef: ["Повар"],
-  bar_manager: ["Бариста", "Бармен"],
+  bar_manager: ["Бариста"],
   finance: ["Кассир"],
 };
 
@@ -81,6 +80,33 @@ function branchFilter(e) {
 
 const canAccessBranch = (e, branchId) => isGlobal(e) || (e.branch_id || 1) === branchId;
 
+/** Inventory: departments and who may work with them. */
+const INVENTORY_DEPARTMENTS = ["Кухня", "Бар", "Посуда", "Хозтовары"];
+const INVENTORY_SCOPE = { chef: ["Кухня"], bar_manager: ["Бар"] };
+
+/** Departments the person can edit / count; null = all. Finance only views. */
+function inventoryEditDepartments(e) {
+  if (!e) return [];
+  if (isManager(e)) return null;
+  return INVENTORY_SCOPE[e.role] || [];
+}
+/** Departments the person can see; null = all. */
+function inventoryViewDepartments(e) {
+  if (!e) return [];
+  if (isManager(e) || e.role === "finance") return null;
+  return INVENTORY_SCOPE[e.role] || [];
+}
+const canUseInventory = (e) => isLead(e);
+const canSeeInventoryMoney = (e) => !!e && (e.role === "owner" || e.role === "manager" || e.role === "finance");
+const canEditInventoryDept = (e, dept) => {
+  const list = inventoryEditDepartments(e);
+  return list === null || list.includes(dept);
+};
+const canViewInventoryDept = (e, dept) => {
+  const list = inventoryViewDepartments(e);
+  return list === null || list.includes(dept);
+};
+
 const ROLE_TITLES = {
   owner: "Владелец",
   manager: "Менеджер",
@@ -93,5 +119,7 @@ const ROLE_TITLES = {
 module.exports = {
   LEAD_ROLES, NON_TEAM_ROLES_SQL, POSITIONS, DEPARTMENT, ROLE_TITLES,
   roleForPosition, isOwner, isManager, isLead, isGlobal, canSeeMoney, canSeeAnalytics,
+  INVENTORY_DEPARTMENTS, inventoryEditDepartments, inventoryViewDepartments, canUseInventory, canSeeInventoryMoney,
+  canEditInventoryDept, canViewInventoryDept,
   editablePositions, visiblePositions, canEditPosition, canViewPosition, branchFilter, canAccessBranch,
 };

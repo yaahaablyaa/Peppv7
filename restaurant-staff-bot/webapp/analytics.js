@@ -68,12 +68,12 @@ function renderAnalytics(d) {
     const money = d.payroll_visible;
     const view = (d.view || analyticsView);
     const range = `${humanDate(d.start)} — ${humanDate(d.end)}`;
-    let html = '<div class="screen"><button class="back-link" data-action="analytics-back">‹ Назад</button><div class="screen-title">Аналитика</div>';
+    let html = '<div class="screen screen--wide"><button class="back-link" data-action="analytics-back">‹ Назад</button><div class="screen-title">Аналитика</div>';
     html += '<div class="screen-sub">Показатели команды по расчётным периодам.</div>';
-    html += '<div class="month-nav"><button class="nav-arrow" data-action="an-month:-1" type="button" aria-label="Предыдущий месяц"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
+    html += '<div class="toolbar"><div class="month-nav"><button class="nav-arrow" data-action="an-month:-1" type="button" aria-label="Предыдущий месяц"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
         `<div class="month-name">${esc(monthTitle(d.month || analyticsMonth))}</div>` +
         '<button class="nav-arrow" data-action="an-month:1" type="button" aria-label="Следующий месяц"${(d.month || analyticsMonth) >= uzbekistanToday().slice(0, 7) ? " disabled" : ""}><svg viewBox="0 0 24 24" width="20" height="20"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>';
-    html += segmented("analytics", [{ id: "p1", label: "1–15" }, { id: "p2", label: "16–конец" }, { id: "full", label: "Месяц" }], view, "an-view:");
+    html += segmented("analytics", [{ id: "p1", label: "1–15" }, { id: "p2", label: "16–конец" }, { id: "full", label: "Месяц" }], view, "an-view:") + "</div>";
     if (d.filters.branches.length > 1) {
         html += '<div class="chips chips--scroll"><button type="button" class="chip' + (analyticsBranch === "all" ? " chip--on" : "") + '" data-action="an-branch:all">Все филиалы</button>' +
             d.filters.branches.map((b) => `<button type="button" class="chip${analyticsBranch === String(b.id) ? " chip--on" : ""}" data-action="an-branch:${b.id}">${esc(b.name)}</button>`).join("") + "</div>";

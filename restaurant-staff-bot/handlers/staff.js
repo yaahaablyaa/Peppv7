@@ -15,10 +15,7 @@ const POSITION_KEYBOARD = {
       { text: "Официант", callback_data: "staff_pos_waiter" },
       { text: "Хостес", callback_data: "staff_pos_hostess" },
     ],
-    [
-      { text: "Бармен", callback_data: "staff_pos_barman" },
-      { text: "Бариста", callback_data: "staff_pos_barista" },
-    ],
+    [{ text: "Бариста", callback_data: "staff_pos_barista" }],
     [
       { text: "Повар", callback_data: "staff_pos_cook" },
       { text: "Кассир", callback_data: "staff_pos_cashier" },

@@ -14,7 +14,7 @@ interface Employee {
   qr_code: string | null;
   branch_id?: number;
   role_title?: string;
-  perms?: { manage: boolean; schedule: boolean; analytics: boolean; money: boolean; branches: boolean };
+  perms?: { manage: boolean; schedule: boolean; analytics: boolean; money: boolean; branches: boolean; inventory?: boolean };
 }
 
 interface TodayInfo {
@@ -58,6 +58,7 @@ interface HomeData {
   news: Post[];
   notifications: NotificationRow[];
   counts: { trainings: number; checklists: number; unread: number };
+  inventory_low?: number;
   progress?: {
     trainings: { done: number; total: number };
     checklists: { done: number; total: number; items_done: number; items_total: number };
@@ -317,10 +318,10 @@ function esc(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
-function haptic(style: "light" | "medium" | "success"): void {
+function haptic(style: "light" | "medium" | "success" | "error"): void {
   try {
-    if (style === "success") {
-      tg.HapticFeedback.notificationOccurred("success");
+    if (style === "success" || style === "error") {
+      tg.HapticFeedback.notificationOccurred(style);
       return;
     }
     tg.HapticFeedback.impactOccurred(style);
@@ -329,7 +330,7 @@ function haptic(style: "light" | "medium" | "success"): void {
   }
 }
 
-const POSITION_LIST: string[] = ["Официант", "Хостес", "Кассир", "Повар", "Бариста", "Бармен", "Тех персонал", "Шеф-повар", "Бар-менеджер", "Финансовый директор", "Менеджер"];
+const POSITION_LIST: string[] = ["Официант", "Хостес", "Кассир", "Повар", "Бариста", "Тех персонал", "Шеф-повар", "Бар-менеджер", "Финансовый директор", "Менеджер"];
 
 const ICONS: Record<string, string> = {
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 4l9 6.5"/><path d="M5.5 9.5V20h13V9.5"/></svg>',
@@ -346,6 +347,8 @@ const ICONS: Record<string, string> = {
   settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.2M12 18.8V21M21 12h-2.2M5.2 12H3M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2 5.6 5.6"/></svg>',
   doc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h7l5 5V20.5H6z"/><path d="M13 3.5V9h5M9 13h6M9 16.5h4"/></svg>',
   exit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4.5H6.5v15H14"/><path d="M11 12h9m0 0-3-3m3 3-3 3"/></svg>',
+  box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3.5 7.5v9L12 21l8.5-4.5v-9L12 3Z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-3.8-3.8"/></svg>',
   branch: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V9l8-5 8 5v11"/><path d="M9 20v-6h6v6M2.5 20h19"/></svg>',
   chevron: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>',
 };
@@ -387,4 +390,54 @@ function errorState(message: string): string {
     `<div class="screen"><div class="section"><div class="empty">${esc(message)}</div></div>` +
     `<button class="button button--secondary" data-action="retry">Повторить</button></div>`
   );
+}
+
+
+/** Outside Telegram (laptop browser) native alert/confirm are replaced by animated in-page dialogs. */
+function installDialogs(): void {
+  if (tg.initData) return;
+  const open = (text: string, buttons: { label: string; main?: boolean; value: boolean }[], done: (v: boolean) => void): void => {
+    const back = document.createElement("div");
+    back.className = "dlg-back";
+    const box = document.createElement("div");
+    box.className = "dlg";
+    box.setAttribute("role", "alertdialog");
+    box.setAttribute("aria-modal", "true");
+    const p = document.createElement("p");
+    p.className = "dlg-text";
+    p.textContent = text;
+    const row = document.createElement("div");
+    row.className = "dlg-actions";
+    let closed = false;
+    const close = (v: boolean) => {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener("keydown", onKey);
+      back.classList.add("dlg-back--out");
+      window.setTimeout(() => { back.remove(); done(v); }, 150);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close(false);
+      else if (e.key === "Enter") close(buttons[buttons.length - 1].value);
+    };
+    buttons.forEach((b) => {
+      const el = document.createElement("button");
+      el.type = "button";
+      el.className = "dlg-btn" + (b.main ? " dlg-btn--main" : "");
+      el.textContent = b.label;
+      el.onclick = () => close(b.value);
+      row.appendChild(el);
+    });
+    box.appendChild(p);
+    box.appendChild(row);
+    back.appendChild(box);
+    back.addEventListener("click", (e) => { if (e.target === back) close(false); });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(back);
+    const main = row.querySelector<HTMLButtonElement>(".dlg-btn--main");
+    if (main) main.focus();
+  };
+  const t = tg as unknown as { showAlert: (m: string, cb?: () => void) => void; showConfirm: (m: string, cb: (ok: boolean) => void) => void };
+  t.showAlert = (message, cb) => open(String(message), [{ label: "Понятно", main: true, value: true }], () => { if (cb) cb(); });
+  t.showConfirm = (message, cb) => open(String(message), [{ label: "Отмена", value: false }, { label: "Подтвердить", main: true, value: true }], cb);
 }
