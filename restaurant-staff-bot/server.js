@@ -16,6 +16,7 @@ const dbAdapter = require("./lib/db-adapter");
 const employees = require("./lib/employees");
 const schema = require("./lib/schema");
 const setupBot = require("./bot");
+const libraryTypes = require("./lib/library").TYPES;
 
 const WEB_DIR = path.join(__dirname, "webapp");
 const SESSION_DAYS = 30;
@@ -92,8 +93,15 @@ function verifySession(secret, token) {
 function createServer({ db, bot, botToken, sessionSecret }) {
   const routes = { GET: new Map(), POST: new Map() };
 
+  const signFile = (id) => {
+    const exp = Date.now() + 15 * 60 * 1000;
+    const sig = crypto.createHmac("sha256", sessionSecret).update(`file:${id}:${exp}`).digest("base64url");
+    return `/files/${id}?exp=${exp}&sig=${sig}`;
+  };
+
   const sdk = {
     db,
+    signFile,
     log,
     escapeHtml,
     chunk,
@@ -116,9 +124,33 @@ function createServer({ db, bot, botToken, sessionSecret }) {
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", 1);
+  app.use("/_api/library/upload", express.json({ limit: "10mb" }));
   app.use(express.json({ limit: "1mb" }));
 
   app.get("/healthz", (req, res) => res.type("text").send("ok"));
+
+  /* library files: signed, short-lived links */
+  app.get("/files/:id", (req, res) => {
+    const id = Number(req.params.id);
+    const exp = Number(req.query.exp);
+    const sig = String(req.query.sig || "");
+    const expected = crypto.createHmac("sha256", sessionSecret).update(`file:${id}:${exp}`).digest("base64url");
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expected);
+    if (!Number.isInteger(id) || !exp || exp < Date.now() || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return res.status(403).type("text").send("Ссылка устарела. Откройте файл из приложения заново.");
+    }
+    const row = db.get("SELECT filename, mime, data FROM library_files WHERE id = ?", [id]);
+    if (!row) return res.status(404).type("text").send("Файл не найден");
+    const ext = (row.filename.toLowerCase().match(/\.([a-z0-9]+)$/) || [])[1];
+    const inline = !!(libraryTypes[ext] && libraryTypes[ext].inline);
+    res.setHeader("Content-Type", row.mime);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'");
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(row.filename)}`);
+    res.send(Buffer.from(row.data));
+  });
 
   /* антиперебор паролей */
   const attempts = new Map();

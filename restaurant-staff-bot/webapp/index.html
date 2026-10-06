@@ -6,7 +6,7 @@
 <title>Рабочее место</title>
 <script>
 (function () {
-  var BUILD = "38";
+  var BUILD = "39";
   function report(kind, message, source, line, column, stack) {
     try {
       navigator.sendBeacon("_client-error", new Blob([JSON.stringify({
@@ -39,6 +39,8 @@
 <script src="applications.js"></script>
 <script src="learning.js"></script>
 <script src="inventory.js"></script>
+<script src="library.js"></script>
+<script src="team.js"></script>
 <script src="analytics.js"></script>
 <script src="app.js"></script>
 </body>

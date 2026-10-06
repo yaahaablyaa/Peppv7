@@ -9,6 +9,7 @@ const registerAnalytics = require("./analytics");
 const registerAnalyticsReport = require("./analytics-report");
 const registerLearning = require("./learning");
 const registerInventory = require("./inventory");
+const registerLibrary = require("./library");
 const { learningProgress } = registerLearning;
 const employees = require("./employees");
 const salary = require("./salary");
@@ -178,8 +179,9 @@ module.exports = function registerApi(bot, sdk) {
       },
       manager_summary: managerSummary,
       news: db.all(
-        "SELECT id, kind, title, body, created_at FROM posts ORDER BY id DESC LIMIT 5"
-      ),
+        "SELECT id, kind, title, body, created_at, positions FROM posts ORDER BY id DESC LIMIT 40"
+      ).filter((post) => roles.inAudience(emp, roles.parsePositions(post.positions))).slice(0, 5)
+        .map(({ positions, ...post }) => ({ ...post, audience: roles.parsePositions(positions) })),
       notifications: db.all(
         `SELECT id, title, body, created_at, read_at FROM notifications
           WHERE employee_id = ? ORDER BY id DESC LIMIT 10`,
@@ -322,7 +324,10 @@ module.exports = function registerApi(bot, sdk) {
         amount: earned.amount,
       };
     }
-    return { employee: member };
+    return {
+      employee: { ...member, branch_id: employee.branch_id },
+      branches: roles.isGlobal(manager) ? db.all("SELECT id, name FROM branches WHERE is_active = 1 ORDER BY id") : [],
+    };
   });
 
   sdk.miniapp.post("/staff/update", async (ctx) => {
@@ -358,6 +363,12 @@ module.exports = function registerApi(bot, sdk) {
       active,
     });
     if (!result.ok) return result;
+    if (body.branch_id !== undefined && roles.isGlobal(manager)) {
+      const wanted = Number(body.branch_id);
+      if (Number.isInteger(wanted) && db.get("SELECT id FROM branches WHERE id = ? AND is_active = 1", [wanted])) {
+        db.run("UPDATE employees SET branch_id = ? WHERE id = ?", [wanted, employeeId]);
+      }
+    }
     if (qrImage) staff.saveQrCode(db, employeeId, qrImage);
     const updated = db.get(
       `SELECT employees.*, qr_codes.code AS qr_code
@@ -596,14 +607,56 @@ module.exports = function registerApi(bot, sdk) {
     return { ok: true };
   });
 
+  /** Many cells at once (paint mode): one notification per employee instead of one per cell. */
+  sdk.miniapp.post("/schedule/team/batch", async (ctx) => {
+    const manager = me(ctx);
+    if (!roles.isLead(manager)) return NO_ACCESS;
+    const items = Array.isArray((ctx.body || {}).items) ? ctx.body.items.slice(0, 400) : [];
+    if (!items.length) return { ok: false, reason: "bad_schedule" };
+    const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
+    const team = new Map(staff.list(db).map((e) => [e.id, e]));
+    const applied = [];
+    const skipped = [];
+    db.transaction(() => {
+      items.forEach((item) => {
+        const employee = team.get(Number(item.employee_id));
+        const date = String(item.date || "");
+        const kind = String(item.kind || "");
+        const start = String(item.start_time || "");
+        const end = String(item.end_time || "");
+        const okShift = kind === "shift" && timeRe.test(start) && timeRe.test(end);
+        if (!employee || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !(kind === "day_off" || okShift)) { skipped.push(item); return; }
+        if (employee.id === manager.id || !roles.canAccessBranch(manager, employee.branch_id) || !roles.canEditPosition(manager, employee.position) || (employee.role === "owner" && !roles.isOwner(manager))) { skipped.push(item); return; }
+        if (kind === "day_off") shifts.setDayOff(db, employee.id, date); else shifts.setShift(db, employee.id, date, start, end);
+        applied.push({ employee, date, kind, start, end });
+      });
+    });
+    const byEmployee = new Map();
+    applied.forEach((a) => { if (!byEmployee.has(a.employee.id)) byEmployee.set(a.employee.id, []); byEmployee.get(a.employee.id).push(a); });
+    for (const [employeeId, list] of byEmployee) {
+      const sample = list.slice(0, 3).map((a) => `${a.date.slice(8)}.${a.date.slice(5, 7)} ${a.kind === "day_off" ? "выходной" : a.start + "–" + a.end}`).join(", ");
+      const text = list.length === 1
+        ? (list[0].kind === "day_off" ? `На ${list[0].date} назначен выходной.` : `На ${list[0].date} назначена смена ${list[0].start}–${list[0].end}.`)
+        : `Изменено дней: ${list.length}. ${sample}${list.length > 3 ? "…" : ""}`;
+      db.run("INSERT INTO notifications (employee_id, title, body) VALUES (?, ?, ?)", [employeeId, "График обновлён", text]);
+      const employee = list[0].employee;
+      if (employee.telegram_id && employee.notifications_on) {
+        try { await bot.api.sendMessage(employee.telegram_id, `🗓 <b>График обновлён</b>\n${sdk.escapeHtml(text)}`, { parse_mode: "HTML" }); } catch (error) { sdk.log.warn(`schedule notify failed for employee ${employeeId}: ${error.message}`); }
+      }
+    }
+    return { ok: applied.length > 0, applied: applied.length, skipped: skipped.length };
+  });
+
   sdk.miniapp.get("/announcements", async (ctx) => {
     const emp = me(ctx);
     if (!emp) return NO_ACCESS;
+    const rows = db.all(
+      "SELECT id, title, body, created_at, positions FROM posts WHERE kind = 'announcement' ORDER BY id DESC LIMIT 100"
+    ).filter((post) => roles.inAudience(emp, roles.parsePositions(post.positions))).slice(0, 50);
     return {
       can_publish: isManager(emp),
-      announcements: db.all(
-        "SELECT id, title, body, created_at FROM posts WHERE kind = 'announcement' ORDER BY id DESC LIMIT 50"
-      ),
+      positions: isManager(emp) ? roles.ALL_POSITIONS : [],
+      announcements: rows.map(({ positions, ...post }) => ({ ...post, audience: roles.parsePositions(positions) })),
     };
   });
 
@@ -614,22 +667,22 @@ module.exports = function registerApi(bot, sdk) {
     const body = ctx.body || {};
     const title = String(body.title || "").trim().replace(/\s+/g, " ");
     const text = String(body.body || "").trim();
+    const audience = roles.cleanAudience(body.positions);
     if (title.length < 2 || title.length > 120 || text.length < 2 || text.length > 2000) {
       return { ok: false, reason: "bad_announcement" };
     }
 
+    const targets = db.all("SELECT id, telegram_id, notifications_on, position, role FROM employees WHERE active = 1")
+      .filter((e) => !audience.length || e.role === "owner" || e.role === "manager" || audience.includes(e.position || ""));
     db.transaction(() => {
-      db.run("INSERT INTO posts (kind, title, body) VALUES ('announcement', ?, ?)", [title, text]);
-      db.all("SELECT id FROM employees WHERE active = 1").forEach((employee) => {
-        db.run(
-          "INSERT INTO notifications (employee_id, title, body) VALUES (?, ?, ?)",
-          [employee.id, "Новое объявление", title]
-        );
+      db.run("INSERT INTO posts (kind, title, body, positions) VALUES ('announcement', ?, ?, ?)", [title, text, JSON.stringify(audience)]);
+      targets.forEach((employee) => {
+        db.run("INSERT INTO notifications (employee_id, title, body) VALUES (?, ?, ?)", [employee.id, "Новое объявление", title]);
       });
     });
 
     await Promise.all(
-      db.all("SELECT id, telegram_id FROM employees WHERE active = 1 AND telegram_id IS NOT NULL AND notifications_on = 1")
+      targets.filter((e) => e.telegram_id && e.notifications_on)
         .map(async (employee) => {
           try {
             await bot.api.sendMessage(
@@ -646,8 +699,59 @@ module.exports = function registerApi(bot, sdk) {
     return { ok: true };
   });
 
+  sdk.miniapp.post("/announcements/delete", async (ctx) => {
+    const manager = me(ctx);
+    if (!isManager(manager)) return NO_ACCESS;
+    const id = Number((ctx.body || {}).id);
+    if (!Number.isInteger(id)) return { ok: false, reason: "not_found" };
+    db.run("DELETE FROM posts WHERE id = ? AND kind = 'announcement'", [id]);
+    return { ok: true };
+  });
+
+  // Branch details: rename and see people grouped by department.
+  sdk.miniapp.get("/branches/get", async (ctx) => {
+    const emp = me(ctx);
+    if (!roles.isLead(emp)) return NO_ACCESS;
+    const id = Number((ctx.query || {}).id);
+    const branch = db.get("SELECT id, name, address FROM branches WHERE id = ? AND is_active = 1", [id]);
+    if (!branch || !roles.canAccessBranch(emp, branch.id)) return { error: "not_found" };
+    const people = db.all(
+      "SELECT id, full_name, position, role, phone, active FROM employees WHERE branch_id = ? AND active = 1 ORDER BY full_name",
+      [branch.id]
+    );
+    const order = roles.POSITION_GROUPS.map((g) => g.name).concat(["Другое"]);
+    const groups = new Map();
+    people.forEach((p) => {
+      const name = roles.groupOfPosition(p.position, p.role);
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name).push({ id: p.id, name: p.full_name, position: p.role === "owner" ? "Владелец" : p.position || "Сотрудник", phone: p.phone });
+    });
+    return {
+      branch,
+      can_edit: roles.isGlobal(emp),
+      total: people.length,
+      groups: order.filter((n) => groups.has(n)).map((n) => ({ name: n, staff: groups.get(n) })),
+    };
+  });
+
+  sdk.miniapp.post("/branches/update", async (ctx) => {
+    const emp = me(ctx);
+    if (!roles.isGlobal(emp)) return NO_ACCESS;
+    const b = ctx.body || {};
+    const id = Number(b.id);
+    const name = String(b.name || "").trim().replace(/\s+/g, " ");
+    const address = String(b.address || "").trim().slice(0, 200);
+    if (!db.get("SELECT id FROM branches WHERE id = ? AND is_active = 1", [id])) return { ok: false, reason: "not_found" };
+    if (name.length < 2 || name.length > 80) return { ok: false, reason: "bad_name" };
+    const clash = db.all("SELECT id, name FROM branches WHERE is_active = 1 AND id != ?", [id]).some((r) => r.name.toLowerCase() === name.toLowerCase());
+    if (clash) return { ok: false, reason: "duplicate" };
+    db.run("UPDATE branches SET name = ?, address = ? WHERE id = ?", [name, address, id]);
+    return { ok: true };
+  });
+
   registerLearning(bot, sdk, { me, isManager, today, NO_ACCESS });
   registerInventory(bot, sdk, { me, NO_ACCESS });
+  registerLibrary(bot, sdk, { me, isManager, NO_ACCESS });
 
   sdk.miniapp.get("/applications", async (ctx) => {
     const emp = me(ctx);

@@ -24,6 +24,7 @@ let selectedTeamCell = null;
 let loginMode = false;
 let branchesMode = false;
 let inventoryMode = false;
+let libraryMode = false;
 let salaryMonth = uzbekistanToday().slice(0, 7);
 let salaryView = "";
 function root() {
@@ -294,13 +295,16 @@ function renderMore(e) {
     html += '</div><div class="col"><div class="section-title">Работа</div><div class="section">';
     html += cell({ icon: "news", title: "Объявления", subtitle: "Новости для команды", tappable: true, action: "announcements" });
     html += cell({ icon: "book", title: "Обучение", subtitle: "Материалы и мой прогресс", tappable: true, action: "trainings" });
+    html += cell({ icon: "doc", title: "Методички", subtitle: "Меню, стандарты, инструкции", tappable: true, action: "library" });
     html += cell({ icon: "check", title: "Чек-листы", tappable: true, action: "checklists" });
     html += cell({ icon: "doc", title: "Заявления", subtitle: "Отправить запрос менеджеру", tappable: true, action: "applications" });
     html += "</div>";
     html += '<div class="section-title">Настройки</div><div class="section">';
-    html += cell({ icon: "bell", title: "Уведомления", value: e.notifications_on ? "Вкл" : "Выкл", tappable: true, action: "toggle-notifications" });
-    const themeLabels = { auto: "Как в Telegram", light: "Светлая", dark: "Тёмная" };
-    html += cell({ icon: "settings", title: "Тема", value: themeLabels[e.theme] || "Как в Telegram", tappable: true, action: "theme" });
+    html += `<div class="cell cell--plain setting-row"><div class="cell-icon" data-i="bell">${icon("bell")}</div><div class="cell-body"><div class="cell-title">Уведомления</div>` +
+        `<div class="cell-subtitle" id="notif-sub">${e.notifications_on ? "Сообщения в Telegram о графике и новостях" : "Отключены: сообщения в Telegram не приходят"}</div></div>` +
+        `<button type="button" class="switch${e.notifications_on ? " switch--on" : ""}" id="notif-switch" role="switch" aria-checked="${e.notifications_on ? "true" : "false"}" aria-label="Уведомления" data-action="toggle-notifications"><i></i></button></div>`;
+    html += `<div class="setting-theme"><div class="cell-icon" data-i="settings">${icon("settings")}</div><div class="setting-theme-main"><div class="cell-title">Тема</div>` +
+        segmented("theme", [{ id: "auto", label: "Авто" }, { id: "light", label: "Светлая" }, { id: "dark", label: "Тёмная" }], e.theme || "auto", "theme-set:") + "</div></div>";
     html += cell({ icon: "exit", title: "Выход", tappable: true, action: "logout" });
     html += "</div>";
     return html + "</div></div></div>";
@@ -313,6 +317,7 @@ function renderAnnouncements(d) {
         html += '<div class="staff-form-heading">Новое объявление</div>';
         html += '<label class="field"><span class="field-label">Заголовок</span><input name="title" maxlength="120" placeholder="Например, Изменение графика" required></label>';
         html += '<label class="field"><span class="field-label">Текст</span><textarea name="body" maxlength="2000" placeholder="Напишите объявление для команды" required></textarea></label>';
+        html += audienceField("ann", d.positions || []);
         html += '<button class="button staff-submit" type="submit">Опубликовать</button></form>';
     }
     html += '<div class="section-title">Все объявления</div><div class="section">';
@@ -321,7 +326,9 @@ function renderAnnouncements(d) {
     }
     else {
         d.announcements.forEach((post) => {
-            html += cell({ icon: "news", title: post.title, subtitle: post.body, value: humanDate(post.created_at.slice(0, 10)) });
+            html += `<div class="ann"><div class="cell-icon" data-i="news">${icon("news")}</div><div class="ann-main"><div class="ann-title">${esc(post.title)}</div>` +
+                `<div class="ann-body">${esc(post.body)}</div><div class="ann-meta">${esc(humanDate(post.created_at.slice(0, 10)))}${audienceTag(post.audience)}</div></div>` +
+                (d.can_publish ? `<button type="button" class="icon-btn icon-btn--danger" data-action="ann-delete:${post.id}" aria-label="Удалить объявление"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4.5h4V7M7 7l1 12.5h8L17 7"/></svg></button>` : "") + "</div>";
         });
     }
     return html + '</div></div>';
@@ -370,7 +377,7 @@ function renderTeam(d) {
     }
     return html + '</div></div>';
 }
-function renderStaffEdit(employee) {
+function renderStaffEdit(employee, branches) {
     const positions = POSITION_LIST.slice();
     if (positions.indexOf(employee.position) < 0 && employee.position)
         positions.push(employee.position);
@@ -384,6 +391,9 @@ function renderStaffEdit(employee) {
     html += '<label class="field"><span class="field-label">Имя и фамилия</span><input name="full_name" value="' + esc(employee.name) + '" required maxlength="100"></label>';
     html += '<label class="field"><span class="field-label">Номер телефона</span><input name="phone" type="tel" inputmode="tel" value="' + esc(employee.phone) + '" data-phone-prefix required maxlength="24"></label>';
     html += '<label class="field"><span class="field-label">Должность</span><select name="position">' + options + '</select></label>';
+    if (branches.length > 1) {
+        html += '<label class="field"><span class="field-label">Филиал</span><select name="branch_id">' + branches.map((b) => `<option value="${b.id}"${employee.branch_id === b.id ? " selected" : ""}>${esc(b.name)}</option>`).join("") + '</select></label>';
+    }
     html += '<label class="field"><span class="field-label">Ставка за час, сум</span><input name="rate" type="number" inputmode="numeric" min="1" value="' + String(employee.rate) + '" required></label>';
     html += '<label class="field"><span class="field-label">Новый пароль</span><span class="field-input-wrap"><input id="team-edit-password" name="password" type="password" placeholder="Оставьте пустым, чтобы не менять" minlength="4" maxlength="64"><button class="field-toggle" type="button" data-action="toggle-edit-password">Показать</button></span></label>';
     html += '<label class="field staff-active"><span><span class="field-label">Доступ</span><b>' + (employee.active ? "Аккаунт активен" : "Аккаунт отключён") + '</b></span><input name="active" type="checkbox"' + (employee.active ? " checked" : "") + '></label>';
@@ -560,56 +570,9 @@ function exportTeamSchedule() {
         tg.showAlert('Не удалось подготовить файл. Попробуйте ещё раз.');
     }
 }
-function renderTeamSchedule(d) {
-    const dates = scheduleDates(d.start);
-    const shiftByCell = {};
-    d.shifts.forEach((shift) => (shiftByCell[`${shift.employee_id}:${shift.date}`] = shift));
-    const selected = selectedTeamCell ? shiftByCell[`${selectedTeamCell.employeeId}:${selectedTeamCell.date}`] : null;
-    const selectedEmployee = selectedTeamCell ? d.employees.find((employee) => employee.id === selectedTeamCell.employeeId) : null;
-    const periodLabel = d.start.slice(8) === "01" ? "1–15" : `16–${d.end.slice(8)}`;
-    const startDate = new Date(`${d.start}T00:00:00.000Z`);
-    let html = '<div class="screen team-schedule-screen"><div class="screen-title">График для команды</div>';
-    html += `<div class="screen-sub">${d.scope === "department" ? "Показан ваш отдел. Выберите ячейку, укажите смену и сохраните." : "Выберите ячейку, укажите смену и сохраните. Ячейки сотрудников, чей график вы не ведёте, доступны только для просмотра."}</div>`;
-    html += '<div class="team-schedule-toolbar"><button class="team-toolbar-button nav-arrow" data-action="team-range:-1" type="button" aria-label="Предыдущий период"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="team-period-title"><span>' + MONTHS[startDate.getUTCMonth()] + ' ' + startDate.getUTCFullYear() + '</span><small>' + periodLabel + '</small></div><button class="team-toolbar-button nav-arrow" data-action="team-range:1" type="button" aria-label="Следующий период"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>';
-    html += '<div class="team-schedule-actions"><button class="team-export-button" data-action="team-export" type="button">' + icon("doc") + '<span>Скачать Excel</span></button></div>';
-    if (selectedTeamCell && selectedEmployee) {
-        const isDayOff = !selected || !!selected.is_day_off;
-        html += '<form class="section team-cell-form" id="team-cell-form">';
-        html += `<div class="team-cell-heading"><span class="team-cell-avatar">${icon("calendar")}</span><span class="team-cell-person"><b>${esc(selectedEmployee.name)}</b><small>${humanDate(selectedTeamCell.date)}</small></span></div>`;
-        html += '<div class="team-cell-kind"><label><input type="radio" name="kind" value="shift"' + (isDayOff ? "" : " checked") + '><span>Смена</span></label>';
-        html += '<label><input type="radio" name="kind" value="day_off"' + (isDayOff ? " checked" : "") + '><span>Выходной</span></label></div>';
-        html += '<div class="time-fields"><label class="field"><span class="field-label">Начало</span><input name="start_time" type="time" value="' + esc(selected && selected.start_time ? shortTime(selected.start_time) : "10:00") + '" required></label>';
-        html += '<label class="field"><span class="field-label">Конец</span><input name="end_time" type="time" value="' + esc(selected && selected.end_time ? shortTime(selected.end_time) : "22:00") + '" required></label></div>';
-        html += '<button class="button team-cell-submit" type="submit">Сохранить смену</button></form>';
-    }
-    html += '<div class="team-table-card"><div class="team-table-wrap"><table class="team-table"><thead><tr><th class="team-name-head">Сотрудник</th>';
-    dates.forEach((date) => {
-        const weekday = DOW[(new Date(`${date}T00:00:00.000Z`).getUTCDay() + 6) % 7];
-        html += `<th class="team-date-head${date === uzbekistanToday() ? " team-date-head--today" : ""}"><small>${weekday}</small><b>${date.slice(8)}</b></th>`;
-    });
-    html += '</tr></thead><tbody>';
-    if (!d.employees.length) {
-        html += `<tr><td class="team-empty" colspan="${dates.length + 1}">Сотрудников пока нет</td></tr>`;
-    }
-    else {
-        d.employees.forEach((employee) => {
-            html += `<tr><th class="team-name"><span>${esc(employee.name)}</span><small>${esc(employee.position || "Должность не указана")}${employee.can_edit === false ? " · просмотр" : ""}</small><em>${esc(employee.phone || "Телефон не указан")}</em></th>`;
-            dates.forEach((date) => {
-                const shift = shiftByCell[`${employee.id}:${date}`];
-                const active = selectedTeamCell && selectedTeamCell.employeeId === employee.id && selectedTeamCell.date === date;
-                const label = shift && !shift.is_day_off ? `${shortTime(shift.start_time)}<br>${shortTime(shift.end_time)}` : "Выходной";
-                const editable = employee.can_edit !== false;
-                html += `<td><button class="team-shift${shift && !shift.is_day_off ? " team-shift--work" : " team-shift--off"}${active ? " team-shift--selected" : ""}${editable ? "" : " team-shift--locked"}" ${editable ? `data-action="team-cell:${employee.id}:${date}"` : "disabled"} type="button">${label}</button></td>`;
-            });
-            html += '</tr>';
-        });
-    }
-    html += '</tbody></table></div></div><div class="section-footer">Изменения сохраняются по кнопке «Сохранить смену». Сотрудник сразу получит уведомление.</div></div>';
-    return html;
-}
 /* --------------------------------------------------------------- Роутер */
 function setOverlayControls(_visible) {
-    const isSubscreen = !loginMode && (activeTab === "analytics" || staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode);
+    const isSubscreen = !loginMode && (activeTab === "analytics" || staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode || libraryMode);
     document.body.classList.remove("has-main-button");
     document.body.classList.remove("has-native-back");
     try {
@@ -646,7 +609,7 @@ async function loadStaff() {
 function swipeAllowed() {
     if (loginMode || document.querySelector(".dlg-back"))
         return false;
-    if (staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode)
+    if (staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode || libraryMode)
         return false;
     return TABS.some((t) => t.id === activeTab);
 }
@@ -956,6 +919,10 @@ async function loadTab(tab) {
 function closeOverlay() {
     if (inventoryMode && invBack())
         return;
+    if (branchesMode && branchBack())
+        return;
+    if (libraryMode && libBack())
+        return;
     if (activeTab === "analytics") {
         setTab("more");
         return;
@@ -964,7 +931,7 @@ function closeOverlay() {
         openTeam();
         return;
     }
-    if (!staffMode && !teamScheduleMode && !announcementsMode && !checklistsMode && !trainingsMode && !applicationsMode && !branchesMode && !inventoryMode)
+    if (!staffMode && !teamScheduleMode && !announcementsMode && !checklistsMode && !trainingsMode && !applicationsMode && !branchesMode && !inventoryMode && !libraryMode)
         return;
     staffMode = false;
     staffScreen = "add";
@@ -976,6 +943,7 @@ function closeOverlay() {
     applicationsMode = false;
     branchesMode = false;
     inventoryMode = false;
+    libraryMode = false;
     trainingsData = null;
     setOverlayControls(false);
     void loadTab("more");
@@ -1020,7 +988,7 @@ async function loadTeamEdit(employeeId) {
         const d = await api("/staff/member?id=" + employeeId);
         if (!d.employee)
             return void (root().innerHTML = errorState("Сотрудник не найден."));
-        root().innerHTML = renderStaffEdit(d.employee);
+        root().innerHTML = renderStaffEdit(d.employee, d.branches || []);
     }
     catch (err) {
         root().innerHTML = errorState("Не удалось загрузить данные сотрудника. Проверьте связь.");
@@ -1094,6 +1062,7 @@ async function loadTeamSchedule() {
     }
 }
 function openTeamSchedule() {
+    teamEnter();
     teamScheduleMode = true;
     staffMode = false;
     selectedTeamCell = null;
@@ -1102,7 +1071,7 @@ function openTeamSchedule() {
     void loadTeamSchedule();
 }
 function setTab(tab) {
-    if (staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode) {
+    if (staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode || libraryMode) {
         staffMode = false;
         staffScreen = "add";
         selectedStaffId = null;
@@ -1113,6 +1082,7 @@ function setTab(tab) {
         applicationsMode = false;
         branchesMode = false;
         inventoryMode = false;
+        libraryMode = false;
     }
     activeTab = tab;
     setOverlayControls(false);
@@ -1157,6 +1127,7 @@ function sideExtras() {
     if (e) {
         links.push({ icon: "news", title: "Объявления", action: "announcements" });
         links.push({ icon: "book", title: "Обучение", action: "trainings" });
+        links.push({ icon: "doc", title: "Методички", action: "library" });
         links.push({ icon: "check", title: "Чек-листы", action: "checklists" });
     }
     const top = '<div class="side-brand"><span class="side-logo">' + icon("home") + '</span><span class="side-brand-text">Рабочее место<small>Персонал ресторана</small></span></div>';
@@ -1421,6 +1392,7 @@ async function submitTeamEdit() {
                 rate: Number(values.get("rate") || 0),
                 password: String(values.get("password") || ""),
                 active: values.get("active") === "on",
+                ...(values.get("branch_id") ? { branch_id: Number(values.get("branch_id")) } : {}),
                 qr_image: qrFile && qrFile.size ? await fileAsDataUrl(qrFile) : "",
             }),
         });
@@ -1474,7 +1446,7 @@ async function submitAnnouncement() {
     try {
         const result = await api("/announcements", {
             method: "POST",
-            body: JSON.stringify({ title, body }),
+            body: JSON.stringify({ title, body, positions: audienceState.ann || [] }),
         });
         if (!result.ok) {
             showLoginAlert("Не удалось опубликовать объявление. Проверьте текст.");
@@ -1488,6 +1460,7 @@ async function submitAnnouncement() {
             tg.HapticFeedback.notificationOccurred("success");
         }
         catch (e) { /* ignore */ }
+        audienceState.ann = [];
         void loadAnnouncements();
     }
     catch (err) {
@@ -1502,58 +1475,6 @@ async function submitAnnouncement() {
             button.disabled = false;
             button.textContent = "Опубликовать";
         }
-    }
-}
-async function submitTeamCell() {
-    const form = root().querySelector("#team-cell-form");
-    if (!form || !teamScheduleMode || !selectedTeamCell)
-        return;
-    const values = new FormData(form);
-    const button = form.querySelector(".team-cell-submit");
-    if (button) {
-        if (button.disabled)
-            return;
-        button.disabled = true;
-        button.textContent = "Сохраняем…";
-    }
-    try {
-        const result = await api("/schedule/team/cell", {
-            method: "POST",
-            body: JSON.stringify({
-                employee_id: selectedTeamCell.employeeId,
-                date: selectedTeamCell.date,
-                kind: String(values.get("kind") || ""),
-                start_time: String(values.get("start_time") || ""),
-                end_time: String(values.get("end_time") || ""),
-            }),
-        });
-        if (!result.ok) {
-            tg.showAlert("Проверьте время смены и попробуйте снова.");
-            try {
-                tg.HapticFeedback.notificationOccurred("error");
-            }
-            catch (e) { /* ignore */ }
-            if (button) {
-                button.disabled = false;
-                button.textContent = "Сохранить смену";
-            }
-            return;
-        }
-        selectedTeamCell = null;
-        try {
-            tg.HapticFeedback.notificationOccurred("success");
-        }
-        catch (e) { /* ignore */ }
-        void loadTeamSchedule();
-    }
-    catch (err) {
-        tg.showAlert("Не удалось сохранить график. Проверьте связь.");
-        try {
-            tg.HapticFeedback.notificationOccurred("error");
-        }
-        catch (e) { /* ignore */ }
-        if (button)
-            button.disabled = false;
     }
 }
 function fileAsDataUrl(file) {
@@ -1593,24 +1514,29 @@ async function saveTheme(theme) {
 async function toggleNotifications() {
     if (!profile)
         return;
-    const notificationsOn = !profile.notifications_on;
-    try {
-        const result = await api("/settings/notifications", {
-            method: "POST",
-            body: JSON.stringify({ notifications_on: notificationsOn }),
-        });
-        if (!result.ok)
-            throw new Error("notifications_not_saved");
-        profile.notifications_on = result.notifications_on === undefined ? notificationsOn : result.notifications_on;
-        haptic("success");
-        void loadTab("more");
-    }
-    catch (err) {
-        tg.showAlert("Не удалось изменить настройки уведомлений. Проверьте связь.");
-        try {
-            tg.HapticFeedback.notificationOccurred("error");
+    const sw = document.getElementById("notif-switch");
+    const sub = document.getElementById("notif-sub");
+    const next = !profile.notifications_on;
+    const paint = (on) => {
+        if (sw) {
+            sw.classList.toggle("switch--on", on);
+            sw.setAttribute("aria-checked", on ? "true" : "false");
         }
-        catch (e) { /* ignore */ }
+        if (sub)
+            sub.textContent = on ? "Сообщения в Telegram о графике и новостях" : "Отключены: сообщения в Telegram не приходят";
+    };
+    profile.notifications_on = next;
+    paint(next);
+    haptic(next ? "medium" : "light");
+    try {
+        const r = await api("/settings/notifications", { method: "POST", body: JSON.stringify({ on: next }) });
+        if (!r.ok)
+            throw new Error("not_saved");
+    }
+    catch (e) {
+        profile.notifications_on = !next;
+        paint(!next);
+        tg.showAlert("Не удалось изменить настройку. Проверьте связь.");
     }
 }
 function chooseTheme() {
@@ -1644,7 +1570,7 @@ function handleAction(action) {
         return setTab(action.slice(4));
     if (action === "analytics-back")
         return setTab("more");
-    if (handleBranchesAction(action) || handleInventoryAction(action))
+    if (handleBranchesAction(action) || handleInventoryAction(action) || handleLibraryAction(action))
         return;
     if (handleAnalyticsAction(action) || handleLearningAction(action))
         return;
@@ -1678,7 +1604,7 @@ function handleAction(action) {
     if (action === "month:next")
         return shiftMonth(1);
     if (action === "retry")
-        return void (staffMode ? (staffScreen === "team" ? loadTeam() : staffScreen === "edit" && selectedStaffId ? loadTeamEdit(selectedStaffId) : loadStaff()) : teamScheduleMode ? openTeamSchedule() : announcementsMode ? loadAnnouncements() : checklistsMode ? loadChecklists() : trainingsMode ? loadTrainings() : branchesMode ? loadBranches() : inventoryMode ? loadInventory() : loadTab(activeTab));
+        return void (staffMode ? (staffScreen === "team" ? loadTeam() : staffScreen === "edit" && selectedStaffId ? loadTeamEdit(selectedStaffId) : loadStaff()) : teamScheduleMode ? openTeamSchedule() : announcementsMode ? loadAnnouncements() : checklistsMode ? loadChecklists() : trainingsMode ? loadTrainings() : branchesMode ? loadBranches() : inventoryMode ? loadInventory() : libraryMode ? loadLibrary() : loadTab(activeTab));
     if (action === "staff")
         return openStaff();
     if (action === "team")
@@ -1727,25 +1653,42 @@ function handleAction(action) {
             void toggleChecklist(Number(checklistId), Number(itemIndex));
         return;
     }
-    if (action.indexOf("team-range:") === 0) {
-        const direction = Number(action.slice(11));
-        if (direction !== -1 && direction !== 1)
-            return;
-        moveTeamSchedulePeriod(direction);
-        selectedTeamCell = null;
-        return void loadTeamSchedule();
+    if (handleTeamAction(action))
+        return;
+    if (action.indexOf("ann-delete:") === 0) {
+        const id = Number(action.slice(11));
+        tg.showConfirm("Удалить объявление? Оно пропадёт у всех сотрудников.", (ok) => {
+            if (!ok)
+                return;
+            void api("/announcements/delete", { method: "POST", body: JSON.stringify({ id }) }).then((r) => {
+                if (!r.ok)
+                    return void tg.showAlert("Не удалось удалить объявление.");
+                haptic("success");
+                void loadAnnouncements();
+            }).catch(() => tg.showAlert("Не удалось удалить. Проверьте связь."));
+        });
+        return;
     }
     if (action === "team-export")
         return exportTeamSchedule();
-    if (action.indexOf("team-cell:") === 0) {
-        const [, employeeId, date] = action.split(":");
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "") || !Number.isInteger(Number(employeeId)))
-            return;
-        selectedTeamCell = { employeeId: Number(employeeId), date };
-        return void loadTeamSchedule();
-    }
     if (action === "theme")
         return chooseTheme();
+    if (action.indexOf("theme-set:") === 0) {
+        const theme = action.slice(10);
+        if ((theme === "auto" || theme === "light" || theme === "dark") && profile) {
+            profile.theme = theme;
+            applyTheme(theme);
+            haptic("light");
+            void api("/settings/theme", { method: "POST", body: JSON.stringify({ theme }) }).catch(() => tg.showAlert("Не удалось сохранить тему."));
+            const seg = root().querySelector(".setting-theme .seg");
+            if (seg) {
+                const idx = ["auto", "light", "dark"].indexOf(theme);
+                seg.style.setProperty("--i", String(idx));
+                seg.querySelectorAll(".seg-btn").forEach((b, i) => b.classList.toggle("seg-btn--on", i === idx));
+            }
+        }
+        return;
+    }
     if (action === "toggle-notifications")
         return void toggleNotifications();
     if (action === "toggle-staff-password" || action === "toggle-edit-password") {
@@ -1834,8 +1777,6 @@ function boot() {
         tg.MainButton.onClick(() => {
             if (staffMode)
                 void submitStaff();
-            if (teamScheduleMode)
-                void submitTeamCell();
         });
         if (tg.isVersionAtLeast("8.0")) {
             tg.onEvent("fullscreenChanged", syncFullscreenLayoutLater);
@@ -1874,13 +1815,11 @@ function boot() {
     });
     root().addEventListener("submit", (ev) => {
         const form = ev.target;
-        if (form.id === "staff-form" || form.id === "team-edit-form" || form.id === "team-cell-form" || form.id === "announcement-form" || form.id === "checklist-form" || form.id === "training-form" || form.id === "branch-form" || form.id === "login-form") {
+        if (form.id === "staff-form" || form.id === "team-edit-form" || form.id === "team-cell-form" || form.id === "announcement-form" || form.id === "checklist-form" || form.id === "training-form" || form.id === "branch-form" || form.id === "branch-edit-form" || form.id === "lib-form" || form.id === "login-form") {
             if (form.id === "staff-form")
                 void submitStaff();
             else if (form.id === "team-edit-form")
                 void submitTeamEdit();
-            else if (form.id === "team-cell-form")
-                void submitTeamCell();
             else if (form.id === "announcement-form")
                 void submitAnnouncement();
             else if (form.id === "checklist-form")
@@ -1889,6 +1828,10 @@ function boot() {
                 void submitTraining();
             else if (form.id === "branch-form")
                 void submitBranch();
+            else if (form.id === "branch-edit-form")
+                void submitBranchEdit();
+            else if (form.id === "lib-form")
+                void submitLibrary();
             else
                 void submitLogin();
         }

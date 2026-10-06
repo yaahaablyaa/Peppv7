@@ -176,6 +176,24 @@ function init(db, log) {
   const correctedAttendance = require("./attendance").recalculateClosedRows(db);
   if (correctedAttendance) log.info(`Recalculated worked minutes for ${correctedAttendance} attendance records`);
 
+  // Audience (positions) for trainings and announcements; empty list = everybody.
+  addColumn(db, "trainings", "positions", "TEXT NOT NULL DEFAULT '[]'");
+  addColumn(db, "posts", "positions", "TEXT NOT NULL DEFAULT '[]'");
+
+  // Library (методички): files stored in the database.
+  db.run(`CREATE TABLE IF NOT EXISTS library_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'Меню',
+    filename TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL DEFAULT 0,
+    data BLOB NOT NULL,
+    positions TEXT NOT NULL DEFAULT '[]',
+    created_by INTEGER,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+
   // Inventory: items, movements journal, counts (инвентаризация) with per-item lines.
   db.run(`CREATE TABLE IF NOT EXISTS inventory_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

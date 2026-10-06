@@ -103,6 +103,56 @@ function afterRender() {
 function countAttr(value, kind) {
     return `data-count="${value}" data-kind="${kind}"`;
 }
+/* ------------------------------------------------- audience ("кому видно") */
+const audienceState = {};
+const audienceList = {};
+function audienceText(list) {
+    return list && list.length ? list.join(", ") : "Все сотрудники";
+}
+function audienceField(key, positions) {
+    audienceList[key] = positions;
+    if (!audienceState[key])
+        audienceState[key] = [];
+    const sel = audienceState[key];
+    return `<div class="field field--aud" data-aud-box="${key}"><span class="field-label">Кому видно</span><div class="chips">` +
+        `<button type="button" class="chip${sel.length ? "" : " chip--on"}" data-action="aud:${key}:all">Все</button>` +
+        positions.map((p, i) => `<button type="button" class="chip${sel.indexOf(p) >= 0 ? " chip--on" : ""}" data-action="aud:${key}:${i}">${esc(p)}</button>`).join("") +
+        `</div><div class="aud-hint" data-aud-hint="${key}">${esc(audienceHint(sel))}</div></div>`;
+}
+function audienceHint(sel) {
+    return sel.length ? "Увидят: " + sel.join(", ") + " (и менеджеры)" : "Увидят все сотрудники";
+}
+function handleAudienceAction(action) {
+    if (action.indexOf("aud:") !== 0)
+        return false;
+    const [, key, which] = action.split(":");
+    const list = audienceList[key] || [];
+    const sel = audienceState[key] || (audienceState[key] = []);
+    if (which === "all")
+        sel.length = 0;
+    else {
+        const name = list[Number(which)];
+        if (name) {
+            const at = sel.indexOf(name);
+            if (at >= 0)
+                sel.splice(at, 1);
+            else
+                sel.push(name);
+        }
+    }
+    root().querySelectorAll(`[data-aud-box="${key}"] [data-action^="aud:${key}:"]`).forEach((chip) => {
+        const w = (chip.dataset.action || "").split(":")[2];
+        chip.classList.toggle("chip--on", w === "all" ? sel.length === 0 : sel.indexOf(list[Number(w)]) >= 0);
+    });
+    const hint = root().querySelector(`[data-aud-hint="${key}"]`);
+    if (hint)
+        hint.textContent = audienceHint(sel);
+    haptic("light");
+    return true;
+}
+function audienceTag(list) {
+    return list && list.length ? `<span class="aud-tag">Для: ${esc(list.join(", "))}</span>` : "";
+}
 let trainingTab = "list";
 let trainingProgress = null;
 let trainingBusy = false;
@@ -120,18 +170,19 @@ function trainingCard(t, manager, index) {
     return `<div class="tr-card${t.done ? " tr-card--done" : ""}" style="--i:${index}">` +
         '<div class="tr-head">' +
         `<div class="tr-title">${esc(t.title)}</div>${toggle}${del}</div>` +
-        `<div class="tr-body">${esc(t.body)}</div>` +
+        (manager ? audienceTag(t.audience) : "") + `<div class="tr-body">${esc(t.body)}</div>` +
         `<div class="tr-foot">${open}${t.done && t.completed_at ? `<span class="tr-done-at">Изучено ${esc(humanDate(t.completed_at.slice(0, 10)))}</span>` : ""}</div>` +
         tail + "</div>";
 }
 function trainingForm() {
     return '<form class="section staff-form staff-form--card" id="training-form">' +
         '<div class="staff-form-heading">Новый материал</div>' +
+        audienceField("tr", (trainingsData && trainingsData.positions) || []) +
         '<label class="field"><span class="field-label">Название</span><input name="title" maxlength="120" placeholder="Например, Стандарты сервиса" required></label>' +
         '<label class="field"><span class="field-label">Описание</span><textarea name="body" maxlength="4000" placeholder="Кратко опишите, что нужно изучить" required></textarea></label>' +
         '<label class="field"><span class="field-label">Ссылка на материал</span><input name="url" type="url" inputmode="url" maxlength="2048" placeholder="https://... (необязательно)"></label>' +
         '<button class="button staff-submit" type="submit">Добавить материал</button></form>' +
-        '<div class="section-footer">Сотрудники получат уведомление и смогут отмечать материал как изученный. Вы увидите прогресс каждого.</div>';
+        '<div class="section-footer">Материал увидят только выбранные должности (менеджеры видят всё). Они получат уведомление и смогут отмечать его изученным, а вы увидите прогресс каждого.</div>';
 }
 function trainingProgressView(p) {
     if (!p.employees.length)
@@ -265,7 +316,7 @@ async function submitTraining() {
         button.textContent = "Добавляем…";
     }
     try {
-        const result = await api("/trainings", { method: "POST", body: JSON.stringify({ title, body, url }) });
+        const result = await api("/trainings", { method: "POST", body: JSON.stringify({ title, body, url, positions: audienceState.tr || [] }) });
         if (!result.ok) {
             tg.showAlert(result.reason === "bad_url" ? "Укажите корректную ссылку с https://." : "Проверьте материал и попробуйте снова.");
             try {
@@ -279,6 +330,7 @@ async function submitTraining() {
         }
         catch (e) { /* ignore */ }
         trainingTab = "list";
+        audienceState.tr = [];
         void loadTrainings();
     }
     catch (err) {
@@ -585,6 +637,8 @@ function openLearningReport(kind) {
 }
 /** Returns true when the action was handled here. */
 function handleLearningAction(action) {
+    if (handleAudienceAction(action))
+        return true;
     if (action.indexOf("tr-tab:") === 0) {
         const tab = action.slice(7);
         if (tab !== "list" && tab !== "progress" && tab !== "new")
@@ -671,15 +725,16 @@ function handleLearningAction(action) {
     return false;
 }
 let branchesData = null;
+let branchDetail = null;
 function renderBranches(d) {
     let html = '<div class="screen"><button class="back-link" data-action="branches-back">‹ Назад</button><div class="screen-title">Филиалы</div>';
-    html += '<div class="screen-sub">Аналитика сравнивает филиалы между собой.</div>';
+    html += '<div class="screen-sub">Нажмите на филиал, чтобы переименовать его и посмотреть сотрудников по подразделениям.</div>';
     html += '<div class="section branch-list section--stagger">';
     if (!d.branches.length)
         html += '<div class="empty">Филиалов пока нет</div>';
     d.branches.forEach((b, i) => {
-        html += `<div class="cell cell--plain" style="--i:${i}"><div class="cell-icon" data-i="branch">${icon("branch")}</div><div class="cell-body"><div class="cell-title">${esc(b.name)}</div>` +
-            `<div class="cell-subtitle">${b.address ? esc(b.address) + " · " : ""}${b.staff} ${plural(b.staff, "сотрудник", "сотрудника", "сотрудников")}</div></div></div>`;
+        html += `<button type="button" class="cell cell--tappable" data-action="branch-open:${b.id}" style="--i:${i}"><div class="cell-icon" data-i="branch">${icon("branch")}</div><div class="cell-body"><div class="cell-title">${esc(b.name)}</div>` +
+            `<div class="cell-subtitle">${b.address ? esc(b.address) + " · " : ""}${b.staff} ${plural(b.staff, "сотрудник", "сотрудника", "сотрудников")}</div></div><span class="inv-chev">${icon("chevron")}</span></button>`;
     });
     html += "</div>";
     if (d.can_manage) {
@@ -692,7 +747,27 @@ function renderBranches(d) {
     }
     return html + "</div>";
 }
+function renderBranchDetail(d) {
+    let html = `<div class="screen"><button class="back-link" data-action="branches-back">‹ Филиалы</button><div class="screen-title">${esc(d.branch.name)}</div>`;
+    html += `<div class="screen-sub">${d.branch.address ? esc(d.branch.address) + " · " : ""}${d.total} ${plural(d.total, "сотрудник", "сотрудника", "сотрудников")}</div>`;
+    if (d.can_edit) {
+        html += '<div class="section-title">Название и адрес</div><form class="section staff-form staff-form--card" id="branch-edit-form">' +
+            `<label class="field"><span class="field-label">Название</span><input name="name" maxlength="80" value="${esc(d.branch.name)}" required></label>` +
+            `<label class="field"><span class="field-label">Адрес</span><input name="address" maxlength="200" value="${esc(d.branch.address || "")}" placeholder="Необязательно"></label>` +
+            '<button class="button staff-submit" type="submit">Сохранить</button></form>';
+    }
+    if (!d.groups.length)
+        return html + '<div class="section-title">Сотрудники</div><div class="section"><div class="empty">В этом филиале пока нет сотрудников</div></div></div>';
+    d.groups.forEach((g, gi) => {
+        html += `<div class="section-title">${esc(g.name)} · ${g.staff.length}</div><div class="section section--stagger">` + g.staff.map((p, i) => `<div class="person" style="--i:${Math.min(i + gi, 8)}">${avatar(p.name)}<div class="person-main"><div class="person-name">${esc(p.name)}</div><div class="person-sub">${esc(p.position)}</div></div><div class="person-phone">${esc(p.phone || "")}</div></div>`).join("") + "</div>";
+    });
+    return html + "</div>";
+}
 async function loadBranches() {
+    if (branchDetail) {
+        void loadBranchDetail(branchDetail.branch.id, false);
+        return;
+    }
     root().innerHTML = skeleton(2);
     try {
         const d = await api("/branches");
@@ -705,6 +780,35 @@ async function loadBranches() {
     catch (e) {
         root().innerHTML = errorState("Не удалось загрузить филиалы. Проверьте связь.");
     }
+}
+async function loadBranchDetail(id, skeletonFirst) {
+    if (skeletonFirst)
+        root().innerHTML = skeleton(3);
+    try {
+        const d = await api("/branches/get?id=" + id);
+        if (d.error) {
+            branchDetail = null;
+            void loadBranches();
+            return;
+        }
+        branchDetail = d;
+        if (!branchesMode)
+            return;
+        if (skeletonFirst)
+            root().innerHTML = renderBranchDetail(d);
+        else
+            rerender(renderBranchDetail(d));
+    }
+    catch (e) {
+        root().innerHTML = errorState("Не удалось загрузить филиал. Проверьте связь.");
+    }
+}
+function branchBack() {
+    if (!branchesMode || !branchDetail)
+        return false;
+    branchDetail = null;
+    void loadBranches();
+    return true;
 }
 async function submitBranch() {
     const form = root().querySelector("#branch-form");
@@ -725,15 +829,42 @@ async function submitBranch() {
         tg.showAlert("Не удалось добавить филиал. Проверьте связь.");
     }
 }
+async function submitBranchEdit() {
+    const form = root().querySelector("#branch-edit-form");
+    if (!form || !branchesMode || !branchDetail)
+        return;
+    const v = new FormData(form);
+    const name = String(v.get("name") || "").trim();
+    if (name.length < 2)
+        return void tg.showAlert("Укажите название филиала.");
+    const id = branchDetail.branch.id;
+    try {
+        const r = await api("/branches/update", { method: "POST", body: JSON.stringify({ id, name, address: String(v.get("address") || "").trim() }) });
+        if (!r.ok)
+            return void tg.showAlert(r.reason === "duplicate" ? "Филиал с таким названием уже есть." : "Проверьте название филиала.");
+        haptic("success");
+        void loadBranchDetail(id, false);
+    }
+    catch (e) {
+        tg.showAlert("Не удалось сохранить. Проверьте связь.");
+    }
+}
 function handleBranchesAction(action) {
     if (action === "branches") {
         branchesMode = true;
+        branchDetail = null;
         setOverlayControls(true);
         void loadBranches();
         return true;
     }
     if (action === "branches-back") {
-        closeOverlay();
+        if (!branchBack())
+            closeOverlay();
+        return true;
+    }
+    if (action.indexOf("branch-open:") === 0 && branchesMode) {
+        haptic("light");
+        void loadBranchDetail(Number(action.slice(12)), true);
         return true;
     }
     return false;

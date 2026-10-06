@@ -161,3 +161,8 @@
   .toolbar > .month-nav { flex-basis: 260px; } .toolbar > .seg { flex-basis: 300px; }
   .side-brand-text small { display: none; }
 }
+
+@media (min-width: 900px) {
+  .team-palette { max-width: 760px; }
+  .team-schedule-screen .chips--scroll { margin-bottom: 12px; }
+}

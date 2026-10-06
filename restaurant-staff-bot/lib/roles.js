@@ -107,6 +107,35 @@ const canViewInventoryDept = (e, dept) => {
   return list === null || list.includes(dept);
 };
 
+/** Departments (подразделения) of a branch, used to group people in lists. */
+const POSITION_GROUPS = [
+  { name: "Администрация", positions: ["Менеджер", "Финансовый директор"] },
+  { name: "Кухня", positions: ["Шеф-повар", "Повар"] },
+  { name: "Бар", positions: ["Бар-менеджер", "Бариста"] },
+  { name: "Зал", positions: ["Официант", "Хостес"] },
+  { name: "Касса", positions: ["Кассир"] },
+  { name: "Тех персонал", positions: ["Тех персонал"] },
+];
+function groupOfPosition(position, role) {
+  if (role === "owner") return "Администрация";
+  const g = POSITION_GROUPS.find((x) => x.positions.includes(position || ""));
+  return g ? g.name : "Другое";
+}
+
+/** Audience: empty list = everybody; managers and owner see everything. */
+const inAudience = (e, positions) => !positions || !positions.length || isManager(e) || positions.includes(e.position || "");
+function parsePositions(raw) {
+  try {
+    const v = JSON.parse(raw || "[]");
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  } catch (error) { return []; }
+}
+const ALL_POSITIONS = POSITIONS.map((p) => p.title);
+/** Clean audience coming from the client: only known positions, max 12. */
+function cleanAudience(list) {
+  return Array.isArray(list) ? [...new Set(list.map((x) => String(x || "").trim()).filter((x) => ALL_POSITIONS.includes(x)))].slice(0, 12) : [];
+}
+
 const ROLE_TITLES = {
   owner: "Владелец",
   manager: "Менеджер",
@@ -118,6 +147,7 @@ const ROLE_TITLES = {
 
 module.exports = {
   LEAD_ROLES, NON_TEAM_ROLES_SQL, POSITIONS, DEPARTMENT, ROLE_TITLES,
+  POSITION_GROUPS, groupOfPosition, inAudience, parsePositions, cleanAudience, ALL_POSITIONS,
   roleForPosition, isOwner, isManager, isLead, isGlobal, canSeeMoney, canSeeAnalytics,
   INVENTORY_DEPARTMENTS, inventoryEditDepartments, inventoryViewDepartments, canUseInventory, canSeeInventoryMoney,
   canEditInventoryDept, canViewInventoryDept,

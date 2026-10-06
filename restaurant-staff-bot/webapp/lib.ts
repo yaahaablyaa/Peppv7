@@ -35,6 +35,7 @@ interface Post {
   title: string;
   body: string;
   created_at: string;
+  audience?: string[];
 }
 
 interface NotificationRow {
@@ -76,6 +77,7 @@ interface HomeData {
 
 interface AnnouncementsData {
   can_publish: boolean;
+  positions?: string[];
   announcements: Post[];
   error?: string;
 }
@@ -114,6 +116,7 @@ interface Training {
   body: string;
   url: string;
   created_at: string;
+  audience?: string[];
   done?: boolean;
   completed_at?: string | null;
   completed?: number;
@@ -122,6 +125,7 @@ interface Training {
 
 interface TrainingsData {
   can_manage: boolean;
+  positions?: string[];
   trainings: Training[];
   progress?: { done: number; total: number };
   error?: string;
@@ -205,6 +209,7 @@ interface StaffMember {
 
 interface StaffMemberData {
   employee?: StaffMember;
+  branches?: { id: number; name: string }[];
   error?: string;
 }
 
