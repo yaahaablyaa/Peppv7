@@ -21,8 +21,11 @@ let trainingsData = null;
 let teamScheduleStart = schedulePeriodStart(uzbekistanToday());
 let teamScheduleData = null;
 let selectedTeamCell = null;
+let teamScheduleBranchFilter = "all";
+let teamSchedulePositionFilter = "all";
 let loginMode = false;
 let branchesMode = false;
+let manualsMode = false;
 let inventoryMode = false;
 let salaryMonth = uzbekistanToday().slice(0, 7);
 let salaryView = "";
@@ -276,6 +279,7 @@ function renderMore(e) {
         html += cell({ icon: "book", title: "Прогресс обучения", subtitle: "Кто что изучил", tappable: true, action: "learn-report:trainings" });
         html += cell({ icon: "check", title: "Отчёт по чек-листам", subtitle: "Кто и что выполнил", tappable: true, action: "learn-report:checklists" });
         html += cell({ icon: "box", title: "Инвентаризация", subtitle: "Остатки, приход, списание, пересчёт", tappable: true, action: "inventory" });
+        html += cell({ icon: "doc", title: "Методички по меню", subtitle: "Файлы и инструкции для команды", tappable: true, action: "manuals" });
         if (e.perms && e.perms.branches)
             html += cell({ icon: "branch", title: "Филиалы", subtitle: "Список и добавление филиалов", tappable: true, action: "branches" });
         html += "</div>";
@@ -287,6 +291,7 @@ function renderMore(e) {
         if (canAnalytics(e))
             html += cell({ icon: "analytics", title: "Аналитика", subtitle: "По всем филиалам и периодам месяца", tappable: true, action: "tab:analytics" });
         html += cell({ icon: "box", title: "Инвентаризация", subtitle: e.role === "finance" ? "Остатки и отчёты по пересчётам" : "Остатки и пересчёт вашего отдела", tappable: true, action: "inventory" });
+        html += cell({ icon: "doc", title: "Методички по меню", subtitle: "Файлы и инструкции", tappable: true, action: "manuals" });
         if (e.perms && e.perms.branches)
             html += cell({ icon: "branch", title: "Филиалы", subtitle: "Список и добавление филиалов", tappable: true, action: "branches" });
         html += "</div>";
@@ -294,11 +299,12 @@ function renderMore(e) {
     html += '</div><div class="col"><div class="section-title">Работа</div><div class="section">';
     html += cell({ icon: "news", title: "Объявления", subtitle: "Новости для команды", tappable: true, action: "announcements" });
     html += cell({ icon: "book", title: "Обучение", subtitle: "Материалы и мой прогресс", tappable: true, action: "trainings" });
+    html += cell({ icon: "doc", title: "Методички по меню", subtitle: "Файлы и инструкции", tappable: true, action: "manuals" });
     html += cell({ icon: "check", title: "Чек-листы", tappable: true, action: "checklists" });
     html += cell({ icon: "doc", title: "Заявления", subtitle: "Отправить запрос менеджеру", tappable: true, action: "applications" });
     html += "</div>";
     html += '<div class="section-title">Настройки</div><div class="section">';
-    html += cell({ icon: "bell", title: "Уведомления", value: e.notifications_on ? "Вкл" : "Выкл", tappable: true, action: "toggle-notifications" });
+    html += `<button type="button" class="settings-toggle-row" data-action="toggle-notifications"><span class="cell-icon" data-i="bell">${icon("bell")}</span><span class="cell-body"><span class="cell-title">Уведомления</span><span class="cell-subtitle">Получать важные сообщения и изменения графика</span></span><span class="switch${e.notifications_on ? " switch--on" : ""}" aria-hidden="true"><i></i></span></button>`;
     const themeLabels = { auto: "Как в Telegram", light: "Светлая", dark: "Тёмная" };
     html += cell({ icon: "settings", title: "Тема", value: themeLabels[e.theme] || "Как в Telegram", tappable: true, action: "theme" });
     html += cell({ icon: "exit", title: "Выход", tappable: true, action: "logout" });
@@ -352,25 +358,31 @@ function renderStaff(d) {
     return html + "</div>";
 }
 function renderTeam(d) {
+    const branchNames = new Map((d.branches || []).map((b) => [Number(b.id), b.name]));
+    const groups = {};
+    d.employees.forEach((employee) => {
+        const branch = branchNames.get(Number(employee.branch_id)) || "Филиал не указан";
+        const position = employee.position || "Без должности";
+        groups[branch] ||= {};
+        groups[branch][position] ||= [];
+        groups[branch][position].push(employee);
+    });
     let html = '<div class="screen"><button class="back-link" data-action="team-back">‹ Назад</button><div class="screen-title">Команда</div>';
-    html += '<div class="screen-sub">Сотрудники ресторана</div><div class="section">';
-    if (!d.employees.length) {
-        html += '<div class="empty">Сотрудников пока нет</div>';
-    }
-    else {
-        d.employees.forEach((employee) => {
-            html += cell({
-                icon: "user",
-                title: employee.name,
-                subtitle: `${esc(employee.position)} · ${employee.active ? "Активен" : "Неактивен"}`,
-                tappable: true,
-                action: `team-edit:${employee.id}`,
+    html += '<div class="screen-sub">Список сотрудников по филиалам и подразделениям</div>';
+    Object.entries(groups).forEach(([branch, positions]) => {
+        html += `<div class="section-title">${esc(branch)}</div>`;
+        Object.entries(positions).forEach(([position, employees]) => {
+            html += `<div class="team-department-label">${esc(position)} · ${employees.length}</div><div class="section">`;
+            employees.forEach((employee) => {
+                html += cell({ icon: "user", title: employee.name, subtitle: `${employee.active ? "Активен" : "Неактивен"}${employee.phone ? " · " + employee.phone : ""}`, tappable: true, action: `team-edit:${employee.id}` });
             });
+            html += '</div>';
         });
-    }
-    return html + '</div></div>';
+    });
+    if (!d.employees.length) html += '<div class="section"><div class="empty">Сотрудников пока нет</div></div>';
+    return html + '</div>';
 }
-function renderStaffEdit(employee) {
+function renderStaffEdit(employee, branches = []) {
     const positions = POSITION_LIST.slice();
     if (positions.indexOf(employee.position) < 0 && employee.position)
         positions.push(employee.position);
@@ -384,6 +396,7 @@ function renderStaffEdit(employee) {
     html += '<label class="field"><span class="field-label">Имя и фамилия</span><input name="full_name" value="' + esc(employee.name) + '" required maxlength="100"></label>';
     html += '<label class="field"><span class="field-label">Номер телефона</span><input name="phone" type="tel" inputmode="tel" value="' + esc(employee.phone) + '" data-phone-prefix required maxlength="24"></label>';
     html += '<label class="field"><span class="field-label">Должность</span><select name="position">' + options + '</select></label>';
+    if (branches.length) html += '<label class="field"><span class="field-label">Филиал</span><select name="branch_id">' + branches.map((b) => `<option value="${b.id}"${Number(employee.branch_id) === Number(b.id) ? " selected" : ""}>${esc(b.name)}</option>`).join("") + '</select></label>';
     html += '<label class="field"><span class="field-label">Ставка за час, сум</span><input name="rate" type="number" inputmode="numeric" min="1" value="' + String(employee.rate) + '" required></label>';
     html += '<label class="field"><span class="field-label">Новый пароль</span><span class="field-input-wrap"><input id="team-edit-password" name="password" type="password" placeholder="Оставьте пустым, чтобы не менять" minlength="4" maxlength="64"><button class="field-toggle" type="button" data-action="toggle-edit-password">Показать</button></span></label>';
     html += '<label class="field staff-active"><span><span class="field-label">Доступ</span><b>' + (employee.active ? "Аккаунт активен" : "Аккаунт отключён") + '</b></span><input name="active" type="checkbox"' + (employee.active ? " checked" : "") + '></label>';
@@ -564,6 +577,7 @@ function renderTeamSchedule(d) {
     const dates = scheduleDates(d.start);
     const shiftByCell = {};
     d.shifts.forEach((shift) => (shiftByCell[`${shift.employee_id}:${shift.date}`] = shift));
+    const filteredEmployees = d.employees.filter((employee) => (teamScheduleBranchFilter === "all" || String(employee.branch_id) === String(teamScheduleBranchFilter)) && (teamSchedulePositionFilter === "all" || employee.position === teamSchedulePositionFilter));
     const selected = selectedTeamCell ? shiftByCell[`${selectedTeamCell.employeeId}:${selectedTeamCell.date}`] : null;
     const selectedEmployee = selectedTeamCell ? d.employees.find((employee) => employee.id === selectedTeamCell.employeeId) : null;
     const periodLabel = d.start.slice(8) === "01" ? "1–15" : `16–${d.end.slice(8)}`;
@@ -572,6 +586,7 @@ function renderTeamSchedule(d) {
     html += `<div class="screen-sub">${d.scope === "department" ? "Показан ваш отдел. Выберите ячейку, укажите смену и сохраните." : "Выберите ячейку, укажите смену и сохраните. Ячейки сотрудников, чей график вы не ведёте, доступны только для просмотра."}</div>`;
     html += '<div class="team-schedule-toolbar"><button class="team-toolbar-button nav-arrow" data-action="team-range:-1" type="button" aria-label="Предыдущий период"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="team-period-title"><span>' + MONTHS[startDate.getUTCMonth()] + ' ' + startDate.getUTCFullYear() + '</span><small>' + periodLabel + '</small></div><button class="team-toolbar-button nav-arrow" data-action="team-range:1" type="button" aria-label="Следующий период"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>';
     html += '<div class="team-schedule-actions"><button class="team-export-button" data-action="team-export" type="button">' + icon("doc") + '<span>Скачать Excel</span></button></div>';
+    html += '<div class="team-filters section"><div class="team-filter-title">Быстрый фильтр команды</div><div class="team-filter-grid"><label class="field"><span class="field-label">Филиал</span><select data-team-filter="branch"><option value="all">Все филиалы</option>' + (d.branches || []).map((b) => `<option value="${b.id}"${String(teamScheduleBranchFilter) === String(b.id) ? " selected" : ""}>${esc(b.name)}</option>`).join("") + '</select></label><label class="field"><span class="field-label">Подразделение</span><select data-team-filter="position"><option value="all">Все подразделения</option>' + [...new Set(d.employees.map((e) => e.position).filter(Boolean))].sort().map((p) => `<option value="${esc(p)}"${teamSchedulePositionFilter === p ? " selected" : ""}>${esc(p)}</option>`).join("") + '</select></label></div></div>';
     if (selectedTeamCell && selectedEmployee) {
         const isDayOff = !selected || !!selected.is_day_off;
         html += '<form class="section team-cell-form" id="team-cell-form">';
@@ -592,7 +607,7 @@ function renderTeamSchedule(d) {
         html += `<tr><td class="team-empty" colspan="${dates.length + 1}">Сотрудников пока нет</td></tr>`;
     }
     else {
-        d.employees.forEach((employee) => {
+        filteredEmployees.forEach((employee) => {
             html += `<tr><th class="team-name"><span>${esc(employee.name)}</span><small>${esc(employee.position || "Должность не указана")}${employee.can_edit === false ? " · просмотр" : ""}</small><em>${esc(employee.phone || "Телефон не указан")}</em></th>`;
             dates.forEach((date) => {
                 const shift = shiftByCell[`${employee.id}:${date}`];
@@ -604,12 +619,12 @@ function renderTeamSchedule(d) {
             html += '</tr>';
         });
     }
-    html += '</tbody></table></div></div><div class="section-footer">Изменения сохраняются по кнопке «Сохранить смену». Сотрудник сразу получит уведомление.</div></div>';
+    html += '</tbody></table></div></div><div class="section-footer">Выберите филиал и подразделение выше — список команды и таблица сразу станут короче. Нажмите на ячейку сотрудника, чтобы быстро назначить смену.</div></div>';
     return html;
 }
 /* --------------------------------------------------------------- Роутер */
 function setOverlayControls(_visible) {
-    const isSubscreen = !loginMode && (activeTab === "analytics" || staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode);
+    const isSubscreen = !loginMode && (activeTab === "analytics" || staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || manualsMode || inventoryMode);
     document.body.classList.remove("has-main-button");
     document.body.classList.remove("has-native-back");
     try {
@@ -646,7 +661,7 @@ async function loadStaff() {
 function swipeAllowed() {
     if (loginMode || document.querySelector(".dlg-back"))
         return false;
-    if (staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode)
+    if (staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || manualsMode || inventoryMode)
         return false;
     return TABS.some((t) => t.id === activeTab);
 }
@@ -964,7 +979,7 @@ function closeOverlay() {
         openTeam();
         return;
     }
-    if (!staffMode && !teamScheduleMode && !announcementsMode && !checklistsMode && !trainingsMode && !applicationsMode && !branchesMode && !inventoryMode)
+    if (!staffMode && !teamScheduleMode && !announcementsMode && !checklistsMode && !trainingsMode && !applicationsMode && !branchesMode && !manualsMode && !inventoryMode)
         return;
     staffMode = false;
     staffScreen = "add";
@@ -975,10 +990,15 @@ function closeOverlay() {
     trainingsMode = false;
     applicationsMode = false;
     branchesMode = false;
+    manualsMode = false;
     inventoryMode = false;
     trainingsData = null;
     setOverlayControls(false);
     void loadTab("more");
+}
+function openManuals() {
+    manualsMode = true; announcementsMode = false; checklistsMode = false; trainingsMode = false; staffMode = false; teamScheduleMode = false; branchesMode = false;
+    setOverlayControls(false); haptic("light"); void loadManuals();
 }
 function openStaff() {
     staffMode = true;
@@ -1020,7 +1040,7 @@ async function loadTeamEdit(employeeId) {
         const d = await api("/staff/member?id=" + employeeId);
         if (!d.employee)
             return void (root().innerHTML = errorState("Сотрудник не найден."));
-        root().innerHTML = renderStaffEdit(d.employee);
+        root().innerHTML = renderStaffEdit(d.employee, d.branches || []);
     }
     catch (err) {
         root().innerHTML = errorState("Не удалось загрузить данные сотрудника. Проверьте связь.");
@@ -1102,7 +1122,7 @@ function openTeamSchedule() {
     void loadTeamSchedule();
 }
 function setTab(tab) {
-    if (staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode) {
+    if (staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || manualsMode || inventoryMode) {
         staffMode = false;
         staffScreen = "add";
         selectedStaffId = null;
@@ -1143,6 +1163,7 @@ function sideExtras() {
         links.push({ icon: "book", title: "Прогресс обучения", action: "learn-report:trainings" });
         links.push({ icon: "check", title: "Отчёт по чек-листам", action: "learn-report:checklists" });
         links.push({ icon: "box", title: "Инвентаризация", action: "inventory" });
+        links.push({ icon: "doc", title: "Методички по меню", action: "manuals" });
         if (e.perms && e.perms.branches)
             links.push({ icon: "branch", title: "Филиалы", action: "branches" });
     }
@@ -1151,12 +1172,14 @@ function sideExtras() {
         if (canAnalytics(e))
             links.push({ icon: "analytics", title: "Аналитика", action: "tab:analytics" });
         links.push({ icon: "box", title: "Инвентаризация", action: "inventory" });
+        links.push({ icon: "doc", title: "Методички по меню", action: "manuals" });
         if (e.perms && e.perms.branches)
             links.push({ icon: "branch", title: "Филиалы", action: "branches" });
     }
     if (e) {
         links.push({ icon: "news", title: "Объявления", action: "announcements" });
         links.push({ icon: "book", title: "Обучение", action: "trainings" });
+        links.push({ icon: "doc", title: "Методички по меню", action: "manuals" });
         links.push({ icon: "check", title: "Чек-листы", action: "checklists" });
     }
     const top = '<div class="side-brand"><span class="side-logo">' + icon("home") + '</span><span class="side-brand-text">Рабочее место<small>Персонал ресторана</small></span></div>';
@@ -1418,6 +1441,7 @@ async function submitTeamEdit() {
                 full_name: String(values.get("full_name") || "").trim(),
                 phone: String(values.get("phone") || "").trim(),
                 position: String(values.get("position") || ""),
+                branch_id: values.get("branch_id") ? Number(values.get("branch_id")) : undefined,
                 rate: Number(values.get("rate") || 0),
                 password: String(values.get("password") || ""),
                 active: values.get("active") === "on",
@@ -1462,6 +1486,9 @@ async function submitAnnouncement() {
     const values = new FormData(form);
     const title = String(values.get("title") || "").trim();
     const body = String(values.get("body") || "").trim();
+    const audience_branches = values.getAll("announcement_audience_branches").map(Number).filter(Number.isInteger);
+    const audience_positions = values.getAll("announcement_audience_positions").map(String);
+    const audience_employees = values.getAll("announcement_audience_employees").map(Number).filter(Number.isInteger);
     if (title.length < 2 || body.length < 2) {
         showLoginAlert("Укажите заголовок и текст объявления.");
         return;
@@ -1474,7 +1501,7 @@ async function submitAnnouncement() {
     try {
         const result = await api("/announcements", {
             method: "POST",
-            body: JSON.stringify({ title, body }),
+            body: JSON.stringify({ title, body, audience_branches, audience_positions, audience_employees }),
         });
         if (!result.ok) {
             showLoginAlert("Не удалось опубликовать объявление. Проверьте текст.");
@@ -1590,6 +1617,41 @@ async function saveTheme(theme) {
         catch (e) { /* ignore */ }
     }
 }
+let manualsData = null;
+async function loadManuals() {
+    root().innerHTML = skeleton(3);
+    try { const d = await api("/manuals"); if (d.error) return void (root().innerHTML = noAccess()); manualsData = d; if (manualsMode) root().innerHTML = renderManuals(d); }
+    catch (e) { root().innerHTML = errorState("Не удалось загрузить методички. Проверьте связь."); }
+}
+function renderManuals(d) {
+    let html = '<div class="screen"><button class="back-link" data-action="manuals-back">‹ Назад</button><div class="screen-title">Методички по меню</div><div class="screen-sub">PDF, изображения и документы с меню и стандартами.</div>';
+    if (d.can_manage) html += '<form class="section staff-form staff-form--card" id="manual-form"><div class="staff-form-heading">Добавить файл</div><label class="field"><span class="field-label">Название</span><input name="title" maxlength="120" placeholder="Например, Меню кухни 2026" required></label>' +
+      (d.branches.length > 1 ? '<label class="field"><span class="field-label">Филиал</span><select name="branch_id">' + d.branches.map((b) => `<option value="${b.id}">${esc(b.name)}</option>`).join("") + '</select></label>' : '') +
+      '<label class="field"><span class="field-label">Файл</span><input name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx" required></label><button class="button staff-submit" type="submit">Загрузить файл</button></form>';
+    html += '<div class="section-title">Файлы</div><div class="section">';
+    if (!d.files.length) html += '<div class="empty">Методичек пока нет</div>';
+    d.files.forEach((f) => { html += `<div class="manual-row"><button type="button" class="manual-open" data-action="manual-open:${f.id}"><span class="cell-icon" data-i="doc">${icon("doc")}</span><span class="cell-body"><span class="cell-title">${esc(f.title)}</span><span class="cell-subtitle">${esc(f.file_name)} · ${humanDate(f.created_at.slice(0,10))}</span></span><span class="cell-chevron">${icon("chevron")}</span></button>${d.can_manage ? `<button type="button" class="icon-btn icon-btn--danger" data-action="manual-delete:${f.id}" aria-label="Удалить">${icon("trash")}</button>` : ''}</div>`; });
+    return html + '</div></div>';
+}
+async function submitManual() {
+    const form = root().querySelector("#manual-form"); if (!form) return;
+    const values = new FormData(form); const file = values.get("file");
+    if (!file || !file.size) return void tg.showAlert("Выберите файл.");
+    if (file.size > 6000000) return void tg.showAlert("Файл должен быть не больше 6 МБ.");
+    const data = await fileAsDataUrl(file);
+    const r = await api("/manuals", { method: "POST", body: JSON.stringify({ title: String(values.get("title") || "").trim(), branch_id: values.get("branch_id") ? Number(values.get("branch_id")) : undefined, file_name: file.name, mime: file.type, data }) });
+    if (!r.ok) return void tg.showAlert("Не удалось загрузить файл. Проверьте формат и размер.");
+    haptic("success"); void loadManuals();
+}
+async function openManualFile(id) {
+    const r = await api("/manuals/file?id=" + id);
+    if (!r.ok || !r.data) return void tg.showAlert("Файл не найден.");
+    try { const blob = await (await fetch(r.data)).blob(); const url = URL.createObjectURL(blob); window.open(url, "_blank", "noopener"); setTimeout(() => URL.revokeObjectURL(url), 60000); } catch (e) { tg.showAlert("Не удалось открыть файл."); }
+}
+function deleteManual(id) {
+    tg.showConfirm("Удалить методичку?", (ok) => { if (!ok) return; void api("/manuals/delete", { method: "POST", body: JSON.stringify({ id }) }).then((r) => { if (!r.ok) return void tg.showAlert("Не удалось удалить файл."); haptic("success"); void loadManuals(); }); });
+}
+
 async function toggleNotifications() {
     if (!profile)
         return;
@@ -1678,7 +1740,7 @@ function handleAction(action) {
     if (action === "month:next")
         return shiftMonth(1);
     if (action === "retry")
-        return void (staffMode ? (staffScreen === "team" ? loadTeam() : staffScreen === "edit" && selectedStaffId ? loadTeamEdit(selectedStaffId) : loadStaff()) : teamScheduleMode ? openTeamSchedule() : announcementsMode ? loadAnnouncements() : checklistsMode ? loadChecklists() : trainingsMode ? loadTrainings() : branchesMode ? loadBranches() : inventoryMode ? loadInventory() : loadTab(activeTab));
+        return void (staffMode ? (staffScreen === "team" ? loadTeam() : staffScreen === "edit" && selectedStaffId ? loadTeamEdit(selectedStaffId) : loadStaff()) : teamScheduleMode ? openTeamSchedule() : announcementsMode ? loadAnnouncements() : checklistsMode ? loadChecklists() : trainingsMode ? loadTrainings() : branchesMode ? loadBranches() : manualsMode ? loadManuals() : inventoryMode ? loadInventory() : loadTab(activeTab));
     if (action === "staff")
         return openStaff();
     if (action === "team")
@@ -1695,6 +1757,10 @@ function handleAction(action) {
         return openAnnouncements();
     if (action === "announcements-back")
         return closeOverlay();
+    if (action === "manuals") return openManuals();
+    if (action === "manuals-back") return closeOverlay();
+    if (action.indexOf("manual-open:") === 0) return void openManualFile(Number(action.slice(13)));
+    if (action.indexOf("manual-delete:") === 0) return void deleteManual(Number(action.slice(14)));
     if (action === "checklists") {
         checklistTab = isMgr(profile) ? "report" : "mine";
         checklistDate = "";
@@ -1872,9 +1938,16 @@ function boot() {
             handleAction(el.dataset.action);
         }
     });
+    root().addEventListener("change", (ev) => {
+        const el = ev.target.closest("[data-team-filter]");
+        if (!el) return;
+        if (el.dataset.teamFilter === "branch") teamScheduleBranchFilter = el.value;
+        if (el.dataset.teamFilter === "position") teamSchedulePositionFilter = el.value;
+        if (teamScheduleMode) rerender(renderTeamSchedule(teamScheduleData));
+    });
     root().addEventListener("submit", (ev) => {
         const form = ev.target;
-        if (form.id === "staff-form" || form.id === "team-edit-form" || form.id === "team-cell-form" || form.id === "announcement-form" || form.id === "checklist-form" || form.id === "training-form" || form.id === "branch-form" || form.id === "login-form") {
+        if (form.id === "staff-form" || form.id === "team-edit-form" || form.id === "team-cell-form" || form.id === "announcement-form" || form.id === "checklist-form" || form.id === "training-form" || form.id === "branch-form" || form.id === "branch-edit-form" || form.id === "manual-form" || form.id === "login-form") {
             if (form.id === "staff-form")
                 void submitStaff();
             else if (form.id === "team-edit-form")
@@ -1889,6 +1962,10 @@ function boot() {
                 void submitTraining();
             else if (form.id === "branch-form")
                 void submitBranch();
+            else if (form.id === "manual-form")
+                void submitManual();
+            else if (form.id === "branch-edit-form")
+                void submitBranchEdit();
             else
                 void submitLogin();
         }

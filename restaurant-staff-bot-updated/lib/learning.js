@@ -22,6 +22,24 @@ function targetsPosition(positions, position, isMgr) {
   return isMgr || !positions.length || positions.includes(position || "");
 }
 
+function audienceMatches(emp, row) {
+  const branches = parseJson(row.audience_branches, []).map(Number).filter(Number.isInteger);
+  const positions = parseJson(row.audience_positions, []).map(String);
+  const employees = parseJson(row.audience_employees, []).map(Number).filter(Number.isInteger);
+  if (!branches.length && !positions.length && !employees.length) return true;
+  if (employees.includes(emp.id)) return true;
+  return (!branches.length || branches.includes(Number(emp.branch_id || 1))) && (!positions.length || positions.includes(String(emp.position || "")));
+}
+
+function audiencePayload(body) {
+  const clean = (value, mapper, max) => Array.isArray(value) ? [...new Set(value.map(mapper).filter(Boolean))].slice(0, max) : [];
+  return {
+    branches: clean(body.audience_branches, (v) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; }, 20),
+    positions: clean(body.audience_positions, (v) => String(v || "").trim().slice(0, 60), 20),
+    employees: clean(body.audience_employees, (v) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; }, 100),
+  };
+}
+
 function itemsOf(row) {
   return parseJson(row.items, []).filter((item) => typeof item === "string");
 }
@@ -34,11 +52,13 @@ function positionsOf(row) {
 /** Progress shown on the home screen. */
 function learningProgress(db, emp, date) {
   const isMgr = emp.role === "manager" || emp.role === "owner";
-  const trainings = db.get("SELECT COUNT(*) AS c FROM trainings").c;
-  const trainingsDone = db.get(
-    "SELECT COUNT(*) AS c FROM training_progress WHERE employee_id = ? AND training_id IN (SELECT id FROM trainings)",
-    [emp.id]
-  ).c;
+  const trainingRows = db.all("SELECT id, audience_branches, audience_positions, audience_employees FROM trainings").filter((row) => audienceMatches(emp, row));
+  const trainingIds = trainingRows.map((row) => row.id);
+  const trainings = trainingIds.length;
+  const trainingsDone = trainingIds.length ? db.get(
+    `SELECT COUNT(*) AS c FROM training_progress WHERE employee_id = ? AND training_id IN (${trainingIds.map(() => "?").join(",")})`,
+    [emp.id, ...trainingIds]
+  ).c : 0;
   const lists = db.all("SELECT id, items, positions FROM checklists")
     .filter((row) => targetsPosition(positionsOf(row), emp.position, isMgr));
   let fullyDone = 0;
@@ -80,7 +100,8 @@ function registerLearning(bot, sdk, helpers) {
     const emp = me(ctx);
     if (!emp) return NO_ACCESS;
     const manager = isManager(emp);
-    const rows = db.all("SELECT id, title, body, url, created_at FROM trainings ORDER BY id DESC LIMIT 100");
+    const rows = db.all("SELECT id, title, body, url, created_at, audience_branches, audience_positions, audience_employees FROM trainings ORDER BY id DESC LIMIT 100");
+    const visibleRows = manager ? rows : rows.filter((row) => audienceMatches(emp, row));
     const mine = new Map(db.all("SELECT training_id, completed_at FROM training_progress WHERE employee_id = ?", [emp.id]).map((r) => [r.training_id, r.completed_at]));
     let counts = new Map();
     let staffTotal = 0;
@@ -92,8 +113,11 @@ function registerLearning(bot, sdk, helpers) {
       ).map((r) => [r.id, r.c]));
       staffTotal = db.get(`SELECT COUNT(*) AS c FROM employees WHERE ${STAFF_FILTER}`).c;
     }
-    const trainings = rows.map((t) => ({
+    const trainings = visibleRows.map((t) => ({
       ...t,
+      audience_branches: parseJson(t.audience_branches, []),
+      audience_positions: parseJson(t.audience_positions, []),
+      audience_employees: parseJson(t.audience_employees, []),
       done: mine.has(t.id),
       completed_at: mine.get(t.id) || null,
       ...(manager ? { completed: counts.get(t.id) || 0, total: staffTotal } : {}),
@@ -102,6 +126,11 @@ function registerLearning(bot, sdk, helpers) {
       can_manage: manager,
       trainings,
       progress: { done: trainings.filter((t) => t.done).length, total: trainings.length },
+      audience: manager ? {
+        branches: db.all("SELECT id, name FROM branches WHERE is_active = 1 ORDER BY id"),
+        positions: require("./roles").POSITIONS.map((p) => p.title),
+        employees: db.all("SELECT id, full_name AS name, position, branch_id FROM employees WHERE active = 1 AND role NOT IN ('owner') ORDER BY full_name"),
+      } : null,
     };
   });
 
@@ -113,6 +142,9 @@ function registerLearning(bot, sdk, helpers) {
     const title = String(body.title || "").trim().replace(/\s+/g, " ");
     const text = String(body.body || "").trim();
     const url = String(body.url || "").trim();
+    const audience = audiencePayload(body);
+    audience.branches = audience.branches.filter((id) => { const b = db.get("SELECT id FROM branches WHERE id = ? AND is_active = 1", [id]); return b && require("./roles").canAccessBranch(manager, id); });
+    audience.employees = audience.employees.filter((id) => { const e = db.get("SELECT id, branch_id, active FROM employees WHERE id = ?", [id]); return e && e.active && require("./roles").canAccessBranch(manager, e.branch_id); });
     let validUrl = "";
     if (url) {
       try {
@@ -127,8 +159,8 @@ function registerLearning(bot, sdk, helpers) {
       return { ok: false, reason: "bad_training" };
     }
 
-    db.run("INSERT INTO trainings (title, body, url) VALUES (?, ?, ?)", [title, text, validUrl]);
-    const staff = db.all(`SELECT id, telegram_id, notifications_on FROM employees WHERE ${STAFF_FILTER}`);
+    db.run("INSERT INTO trainings (title, body, url, branch_id, audience_branches, audience_positions, audience_employees) VALUES (?, ?, ?, ?, ?, ?, ?)", [title, text, validUrl, manager.branch_id || 1, JSON.stringify(audience.branches), JSON.stringify(audience.positions), JSON.stringify(audience.employees)]);
+    const staff = db.all(`SELECT id, telegram_id, notifications_on, branch_id, position FROM employees WHERE ${STAFF_FILTER}`).filter((e) => require("./roles").canAccessBranch(manager, e.branch_id) && audienceMatches(e, { audience_branches: JSON.stringify(audience.branches), audience_positions: JSON.stringify(audience.positions), audience_employees: JSON.stringify(audience.employees) }));
     await broadcast(staff, "Новый материал для обучения", title,
       `📚 <b>Новый материал для обучения</b>\n${sdk.escapeHtml(title)}`);
     return { ok: true };
@@ -175,9 +207,9 @@ function registerLearning(bot, sdk, helpers) {
     });
     const employees = staff.map((e) => {
       const done = byEmployee.get(e.id) || new Map();
-      const items = trainings.map((t) => ({ training_id: t.id, title: t.title, done: done.has(t.id), at: done.get(t.id) || null }));
+      const items = trainings.filter((t) => audienceMatches(e, t)).map((t) => ({ training_id: t.id, title: t.title, done: done.has(t.id), at: done.get(t.id) || null }));
       const doneCount = items.filter((i) => i.done).length;
-      return { ...e, done: doneCount, total: trainings.length, percent: trainings.length ? Math.round(doneCount / trainings.length * 100) : 0, items };
+      return { ...e, done: doneCount, total: items.length, percent: items.length ? Math.round(doneCount / items.length * 100) : 0, items };
     });
     const summary = trainings.length && employees.length
       ? Math.round(employees.reduce((sum, e) => sum + e.percent, 0) / employees.length)

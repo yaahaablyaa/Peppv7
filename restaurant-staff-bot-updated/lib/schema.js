@@ -49,6 +49,12 @@ function migrateBranches(db) {
     for (const table of ["posts", "trainings", "checklists"]) {
       addColumn(db, table, "branch_id", "INTEGER NOT NULL DEFAULT 1");
     }
+    addColumn(db, "posts", "audience_branches", "TEXT NOT NULL DEFAULT '[]'");
+    addColumn(db, "posts", "audience_positions", "TEXT NOT NULL DEFAULT '[]'");
+    addColumn(db, "posts", "audience_employees", "TEXT NOT NULL DEFAULT '[]'");
+    addColumn(db, "trainings", "audience_branches", "TEXT NOT NULL DEFAULT '[]'");
+    addColumn(db, "trainings", "audience_positions", "TEXT NOT NULL DEFAULT '[]'");
+    addColumn(db, "trainings", "audience_employees", "TEXT NOT NULL DEFAULT '[]'");
     db.run("CREATE INDEX IF NOT EXISTS idx_branches_organization_active ON branches (organization_id, is_active)");
     db.run("CREATE INDEX IF NOT EXISTS idx_employees_branch_active ON employees (branch_id, active, role)");
     db.run("CREATE INDEX IF NOT EXISTS idx_posts_branch_kind ON posts (branch_id, kind, id)");
@@ -157,6 +163,17 @@ function init(db, log) {
     read_at TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS menu_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER NOT NULL DEFAULT 1,
+    title TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    mime TEXT NOT NULL DEFAULT 'application/octet-stream',
+    data TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  db.run("CREATE INDEX IF NOT EXISTS idx_menu_files_branch ON menu_files (branch_id, id)");
 
   migrateBranches(db);
 

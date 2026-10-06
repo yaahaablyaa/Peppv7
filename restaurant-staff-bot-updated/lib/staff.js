@@ -114,13 +114,13 @@ function update(sdk, db, id, draft) {
 
   if (password) {
     db.run(
-      "UPDATE employees SET full_name = ?, phone = ?, position = ?, role = ?, hourly_rate = ?, active = ?, password_hash = ? WHERE id = ?",
-      [draft.full_name, phone, position, role, Math.round(rate), active, employees.sha256(sdk, password), id]
+      "UPDATE employees SET full_name = ?, phone = ?, position = ?, role = ?, hourly_rate = ?, active = ?, branch_id = ?, password_hash = ? WHERE id = ?",
+      [draft.full_name, phone, position, role, Math.round(rate), active, draft.branch_id || employee.branch_id || 1, employees.sha256(sdk, password), id]
     );
   } else {
     db.run(
-      "UPDATE employees SET full_name = ?, phone = ?, position = ?, role = ?, hourly_rate = ?, active = ? WHERE id = ?",
-      [draft.full_name, phone, position, role, Math.round(rate), active, id]
+      "UPDATE employees SET full_name = ?, phone = ?, position = ?, role = ?, hourly_rate = ?, active = ?, branch_id = ? WHERE id = ?",
+      [draft.full_name, phone, position, role, Math.round(rate), active, draft.branch_id || employee.branch_id || 1, id]
     );
   }
 
