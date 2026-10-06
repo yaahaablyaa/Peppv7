@@ -59,7 +59,6 @@ function publicStaffMember(emp) {
     rate: employee.rate,
     active: !!emp.active,
     qr_code: employee.qr_code,
-    branch_id: employee.branch_id || 1,
   };
 }
 
@@ -69,33 +68,6 @@ function isManager(emp) {
 
 function canViewTeamPayroll(emp) {
   return isManager(emp) && emp.telegram_id === OWNER_TELEGRAM_ID;
-}
-
-function jsonList(value) {
-  try {
-    const parsed = JSON.parse(value || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) { return []; }
-}
-
-function audienceMatches(emp, row) {
-  const branches = jsonList(row.audience_branches).map(Number).filter(Number.isInteger);
-  const positions = jsonList(row.audience_positions).map(String);
-  const employees = jsonList(row.audience_employees).map(Number).filter(Number.isInteger);
-  if (!branches.length && !positions.length && !employees.length) return true;
-  if (employees.includes(emp.id)) return true;
-  const branchOk = !branches.length || branches.includes(Number(emp.branch_id || 1));
-  const positionOk = !positions.length || positions.includes(String(emp.position || ""));
-  return branchOk && positionOk;
-}
-
-function audiencePayload(body) {
-  const clean = (value, mapper, max) => Array.isArray(value) ? [...new Set(value.map(mapper).filter(Boolean))].slice(0, max) : [];
-  return {
-    branches: clean(body.audience_branches, (v) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; }, 20),
-    positions: clean(body.audience_positions, (v) => String(v || "").trim().slice(0, 60), 20),
-    employees: clean(body.audience_employees, (v) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; }, 100),
-  };
 }
 
 module.exports = function registerApi(bot, sdk) {
@@ -206,8 +178,8 @@ module.exports = function registerApi(bot, sdk) {
       },
       manager_summary: managerSummary,
       news: db.all(
-        "SELECT id, kind, title, body, created_at, audience_branches, audience_positions, audience_employees FROM posts ORDER BY id DESC LIMIT 30"
-      ).filter((post) => post.kind !== "announcement" || isManager(emp) || audienceMatches(emp, post)).slice(0, 5),
+        "SELECT id, kind, title, body, created_at FROM posts ORDER BY id DESC LIMIT 5"
+      ),
       notifications: db.all(
         `SELECT id, title, body, created_at, read_at FROM notifications
           WHERE employee_id = ? ORDER BY id DESC LIMIT 10`,
@@ -216,7 +188,7 @@ module.exports = function registerApi(bot, sdk) {
       progress: learningProgress(db, emp, date),
       inventory_low: registerInventory.lowStock(db, emp),
       counts: {
-        trainings: db.all("SELECT id, audience_branches, audience_positions, audience_employees FROM trainings").filter((t) => audienceMatches(emp, t)).length,
+        trainings: db.get("SELECT COUNT(*) AS c FROM trainings").c,
         checklists: db.get("SELECT COUNT(*) AS c FROM checklists").c,
         unread: db.get(
           "SELECT COUNT(*) AS c FROM notifications WHERE employee_id = ? AND read_at IS NULL",
@@ -350,10 +322,7 @@ module.exports = function registerApi(bot, sdk) {
         amount: earned.amount,
       };
     }
-    return {
-      employee: member,
-      branches: roles.isGlobal(manager) ? db.all("SELECT id, name FROM branches WHERE is_active = 1 ORDER BY id") : [],
-    };
+    return { employee: member };
   });
 
   sdk.miniapp.post("/staff/update", async (ctx) => {
@@ -369,14 +338,6 @@ module.exports = function registerApi(bot, sdk) {
     const fullName = String(body.full_name || "").trim().replace(/\s+/g, " ");
     const position = String(body.position || "").trim().slice(0, 60);
     const active = body.active === true || body.active === 1;
-    let branchId = target.branch_id || 1;
-    if (roles.isGlobal(manager) && body.branch_id !== undefined) {
-      const wanted = Number(body.branch_id);
-      if (!db.get("SELECT id FROM branches WHERE id = ? AND is_active = 1", [wanted])) return { ok: false, reason: "bad_branch" };
-      branchId = wanted;
-    } else if (!roles.isGlobal(manager) && body.branch_id !== undefined && Number(body.branch_id) !== branchId) {
-      return { ok: false, reason: "bad_branch" };
-    }
     const nextRole = staff.roleForPosition(position);
     if ((!active && employeeId === manager.id) ||
         (target.role === "manager" && (nextRole !== "manager" || !active) &&
@@ -395,7 +356,6 @@ module.exports = function registerApi(bot, sdk) {
       rate: body.rate,
       password: String(body.password || ""),
       active,
-      branch_id: branchId,
     });
     if (!result.ok) return result;
     if (qrImage) staff.saveQrCode(db, employeeId, qrImage);
@@ -460,16 +420,6 @@ module.exports = function registerApi(bot, sdk) {
     };
   });
 
-  sdk.miniapp.get("/branches/detail", async (ctx) => {
-    const emp = me(ctx);
-    if (!roles.isLead(emp)) return NO_ACCESS;
-    const id = Number((ctx.query || {}).id);
-    const branch = db.get("SELECT id, name, address FROM branches WHERE id = ? AND is_active = 1", [id]);
-    if (!branch || !roles.canAccessBranch(emp, id)) return { error: "not_found" };
-    const employees = db.all("SELECT id, full_name, position, role, active, phone FROM employees WHERE branch_id = ? ORDER BY active DESC, position, full_name", [id]);
-    return { branch, employees: employees.map((e) => ({ id: e.id, name: e.full_name, position: e.position, role: e.role, active: !!e.active, phone: e.phone })) };
-  });
-
   sdk.miniapp.post("/branches", async (ctx) => {
     const emp = me(ctx);
     if (!roles.isGlobal(emp)) return NO_ACCESS;
@@ -481,20 +431,6 @@ module.exports = function registerApi(bot, sdk) {
     const next = db.get("SELECT COALESCE(MAX(id), 0) + 1 AS id FROM branches").id;
     db.run("INSERT INTO branches (id, organization_id, name, code, address) VALUES (?, 1, ?, ?, ?)", [next, name, "B" + next, address]);
     return { ok: true, id: next };
-  });
-
-  sdk.miniapp.post("/branches/update", async (ctx) => {
-    const emp = me(ctx);
-    if (!roles.isGlobal(emp)) return NO_ACCESS;
-    const body = ctx.body || {};
-    const id = Number(body.id);
-    const name = String(body.name || "").trim().replace(/\s+/g, " ");
-    const address = String(body.address || "").trim().slice(0, 200);
-    if (!Number.isInteger(id) || name.length < 2 || name.length > 80) return { ok: false, reason: "bad_data" };
-    if (!db.get("SELECT id FROM branches WHERE id = ? AND is_active = 1", [id])) return { ok: false, reason: "not_found" };
-    if (db.get("SELECT id FROM branches WHERE lower(name) = lower(?) AND id != ? AND is_active = 1", [name, id])) return { ok: false, reason: "duplicate" };
-    db.run("UPDATE branches SET name = ?, address = ?, updated_at = datetime('now') WHERE id = ?", [name, address, id]);
-    return { ok: true };
   });
 
   sdk.miniapp.post("/staff/dismiss", async (ctx) => {
@@ -628,7 +564,6 @@ module.exports = function registerApi(bot, sdk) {
       end,
       scope: roles.visiblePositions(manager) === null ? "all" : "department",
       employees: visible.map((e) => ({ ...publicStaffMember(e), can_edit: e.id !== manager.id && roles.canEditPosition(manager, e.position) && (e.role !== "owner" || roles.isOwner(manager)) })),
-      branches: db.all("SELECT id, name FROM branches WHERE is_active = 1 ORDER BY id").filter((b) => roles.canAccessBranch(manager, b.id)),
       shifts: db.all(
         `SELECT employee_id, date, start_time, end_time, is_day_off, note FROM shifts
          WHERE date >= ? AND date <= ? ORDER BY employee_id, date`,
@@ -664,87 +599,50 @@ module.exports = function registerApi(bot, sdk) {
   sdk.miniapp.get("/announcements", async (ctx) => {
     const emp = me(ctx);
     if (!emp) return NO_ACCESS;
-    const rows = db.all("SELECT id, title, body, created_at, audience_branches, audience_positions, audience_employees FROM posts WHERE kind = 'announcement' ORDER BY id DESC LIMIT 100");
     return {
       can_publish: isManager(emp),
-      announcements: rows.filter((p) => isManager(emp) || audienceMatches(emp, p)).map((p) => ({
-        id: p.id, title: p.title, body: p.body, created_at: p.created_at,
-        audience_branches: jsonList(p.audience_branches), audience_positions: jsonList(p.audience_positions), audience_employees: jsonList(p.audience_employees),
-      })),
-      audience: isManager(emp) ? {
-        branches: db.all("SELECT id, name FROM branches WHERE is_active = 1 ORDER BY id").filter((b) => roles.canAccessBranch(emp, b.id)),
-        positions: roles.POSITIONS.map((p) => p.title),
-        employees: db.all("SELECT id, full_name AS name, position, branch_id FROM employees WHERE active = 1 AND role NOT IN ('owner') ORDER BY full_name"),
-      } : null,
+      announcements: db.all(
+        "SELECT id, title, body, created_at FROM posts WHERE kind = 'announcement' ORDER BY id DESC LIMIT 50"
+      ),
     };
   });
 
   sdk.miniapp.post("/announcements", async (ctx) => {
     const manager = me(ctx);
     if (!isManager(manager)) return NO_ACCESS;
+
     const body = ctx.body || {};
     const title = String(body.title || "").trim().replace(/\s+/g, " ");
     const text = String(body.body || "").trim();
-    if (title.length < 2 || title.length > 120 || text.length < 2 || text.length > 2000) return { ok: false, reason: "bad_announcement" };
-    const audience = audiencePayload(body);
-    audience.branches = audience.branches.filter((id) => roles.canAccessBranch(manager, id));
-    audience.employees = audience.employees.filter((id) => { const e = staff.byId(db, id); return e && e.active && roles.canAccessBranch(manager, e.branch_id); });
-    const allStaff = db.all("SELECT id, telegram_id, notifications_on, branch_id, position, active FROM employees WHERE active = 1");
-    const recipients = allStaff.filter((e) => roles.isGlobal(manager) ? audienceMatches(e, { audience_branches: JSON.stringify(audience.branches), audience_positions: JSON.stringify(audience.positions), audience_employees: JSON.stringify(audience.employees) }) : roles.canAccessBranch(manager, e.branch_id) && audienceMatches(e, { audience_branches: JSON.stringify(audience.branches), audience_positions: JSON.stringify(audience.positions), audience_employees: JSON.stringify(audience.employees) }));
+    if (title.length < 2 || title.length > 120 || text.length < 2 || text.length > 2000) {
+      return { ok: false, reason: "bad_announcement" };
+    }
+
     db.transaction(() => {
-      db.run("INSERT INTO posts (kind, title, body, branch_id, audience_branches, audience_positions, audience_employees) VALUES ('announcement', ?, ?, ?, ?, ?, ?)", [title, text, manager.branch_id || 1, JSON.stringify(audience.branches), JSON.stringify(audience.positions), JSON.stringify(audience.employees)]);
-      recipients.forEach((employee) => db.run("INSERT INTO notifications (employee_id, title, body) VALUES (?, ?, ?)", [employee.id, "Новое объявление", title]));
+      db.run("INSERT INTO posts (kind, title, body) VALUES ('announcement', ?, ?)", [title, text]);
+      db.all("SELECT id FROM employees WHERE active = 1").forEach((employee) => {
+        db.run(
+          "INSERT INTO notifications (employee_id, title, body) VALUES (?, ?, ?)",
+          [employee.id, "Новое объявление", title]
+        );
+      });
     });
-    await Promise.all(recipients.filter((e) => e.telegram_id && e.notifications_on).map(async (employee) => {
-      try { await bot.api.sendMessage(employee.telegram_id, `📢 <b>${sdk.escapeHtml(title)}</b>\n${sdk.escapeHtml(text)}`, { parse_mode: "HTML" }); }
-      catch (error) { sdk.log.warn(`announcement notify failed for employee ${employee.id}: ${error.message}`); }
-    }));
-    return { ok: true };
-  });
 
-  sdk.miniapp.get("/manuals", async (ctx) => {
-    const emp = me(ctx);
-    if (!emp) return NO_ACCESS;
-    const rows = db.all("SELECT id, branch_id, title, file_name, mime, created_at FROM menu_files ORDER BY id DESC LIMIT 100");
-    return {
-      can_manage: isManager(emp),
-      files: rows.filter((f) => roles.isGlobal(emp) || f.branch_id === (emp.branch_id || 1)).map((f) => ({ ...f })),
-      branches: isManager(emp) ? db.all("SELECT id, name FROM branches WHERE is_active = 1 ORDER BY id").filter((b) => roles.canAccessBranch(emp, b.id)) : [],
-    };
-  });
+    await Promise.all(
+      db.all("SELECT id, telegram_id FROM employees WHERE active = 1 AND telegram_id IS NOT NULL AND notifications_on = 1")
+        .map(async (employee) => {
+          try {
+            await bot.api.sendMessage(
+              employee.telegram_id,
+              `📢 <b>${sdk.escapeHtml(title)}</b>\n${sdk.escapeHtml(text)}`,
+              { parse_mode: "HTML" }
+            );
+          } catch (error) {
+            sdk.log.warn(`announcement notify failed for employee ${employee.id}: ${error.message}`);
+          }
+        })
+    );
 
-  sdk.miniapp.get("/manuals/file", async (ctx) => {
-    const emp = me(ctx);
-    if (!emp) return NO_ACCESS;
-    const id = Number((ctx.query || {}).id);
-    const row = db.get("SELECT id, branch_id, title, file_name, mime, data FROM menu_files WHERE id = ?", [id]);
-    if (!row || (!roles.isGlobal(emp) && row.branch_id !== (emp.branch_id || 1))) return NO_ACCESS;
-    return { ok: true, ...row };
-  });
-
-  sdk.miniapp.post("/manuals", async (ctx) => {
-    const manager = me(ctx);
-    if (!isManager(manager)) return NO_ACCESS;
-    const body = ctx.body || {};
-    const title = String(body.title || "").trim().slice(0, 120);
-    const fileName = String(body.file_name || "").trim().slice(0, 160);
-    const mime = String(body.mime || "application/octet-stream").slice(0, 120);
-    const data = String(body.data || "");
-    const branchId = roles.isGlobal(manager) && body.branch_id !== undefined ? Number(body.branch_id) : (manager.branch_id || 1);
-    if (title.length < 2 || fileName.length < 1 || data.length < 1 || data.length > 8500000) return { ok: false, reason: "bad_file" };
-    if (!db.get("SELECT id FROM branches WHERE id = ? AND is_active = 1", [branchId]) || !roles.canAccessBranch(manager, branchId)) return { ok: false, reason: "bad_branch" };
-    if (!/^data:(application\/pdf|image\/(png|jpeg|webp)|application\/vnd.openxmlformats-officedocument\.wordprocessingml\.document|application\/msword);base64,/.test(data)) return { ok: false, reason: "bad_file" };
-    db.run("INSERT INTO menu_files (branch_id, title, file_name, mime, data) VALUES (?, ?, ?, ?, ?)", [branchId, title, fileName, mime, data]);
-    return { ok: true };
-  });
-
-  sdk.miniapp.post("/manuals/delete", async (ctx) => {
-    const manager = me(ctx);
-    if (!isManager(manager)) return NO_ACCESS;
-    const id = Number((ctx.body || {}).id);
-    const row = db.get("SELECT id, branch_id FROM menu_files WHERE id = ?", [id]);
-    if (!row || !roles.canAccessBranch(manager, row.branch_id)) return { ok: false, reason: "not_found" };
-    db.run("DELETE FROM menu_files WHERE id = ?", [id]);
     return { ok: true };
   });
 

@@ -116,7 +116,7 @@ function createServer({ db, bot, botToken, sessionSecret }) {
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", 1);
-  app.use(express.json({ limit: "10mb" }));
+  app.use(express.json({ limit: "1mb" }));
 
   app.get("/healthz", (req, res) => res.type("text").send("ok"));
 

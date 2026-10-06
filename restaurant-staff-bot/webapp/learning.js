@@ -124,24 +124,12 @@ function trainingCard(t, manager, index) {
         `<div class="tr-foot">${open}${t.done && t.completed_at ? `<span class="tr-done-at">Изучено ${esc(humanDate(t.completed_at.slice(0, 10)))}</span>` : ""}</div>` +
         tail + "</div>";
 }
-function audienceFields(audience, prefix = "audience") {
-    if (!audience) return "";
-    const positions = (audience.positions || []).map((p) => `<label class="audience-chip"><input type="checkbox" name="${prefix}_positions" value="${esc(p)}"><span>${esc(p)}</span></label>`).join("");
-    const branches = (audience.branches || []).map((b) => `<label class="audience-chip"><input type="checkbox" name="${prefix}_branches" value="${b.id}"><span>${esc(b.name)}</span></label>`).join("");
-    const employees = (audience.employees || []).map((e) => `<option value="${e.id}">${esc(e.name)} · ${esc(e.position || "")}</option>`).join("");
-    return '<div class="audience-box"><div class="staff-form-heading">Кому видно</div>' +
-      '<div class="field"><span class="field-label">Филиалы</span><div class="audience-grid">' + (branches || '<span class="field-hint">Филиалы не добавлены</span>') + '</div></div>' +
-      '<div class="field"><span class="field-label">Подразделения / должности</span><div class="audience-grid">' + (positions || '<span class="field-hint">Нет доступных должностей</span>') + '</div></div>' +
-      '<label class="field"><span class="field-label">Отдельные сотрудники</span><select name="' + prefix + '_employees" multiple size="5">' + employees + '</select><small class="field-hint">Если выбран сотрудник, он увидит материал независимо от остальных фильтров.</small></label>' +
-      '<div class="field-hint">Если ничего не выбрать, материал будет виден всей доступной команде.</div></div>';
-}
-
-function trainingForm(d = {}) {
+function trainingForm() {
     return '<form class="section staff-form staff-form--card" id="training-form">' +
         '<div class="staff-form-heading">Новый материал</div>' +
         '<label class="field"><span class="field-label">Название</span><input name="title" maxlength="120" placeholder="Например, Стандарты сервиса" required></label>' +
         '<label class="field"><span class="field-label">Описание</span><textarea name="body" maxlength="4000" placeholder="Кратко опишите, что нужно изучить" required></textarea></label>' +
-        '<label class="field"><span class="field-label">Ссылка на материал</span><input name="url" type="url" inputmode="url" maxlength="2048" placeholder="https://... (необязательно)"></label>' + audienceFields(d.audience) +
+        '<label class="field"><span class="field-label">Ссылка на материал</span><input name="url" type="url" inputmode="url" maxlength="2048" placeholder="https://... (необязательно)"></label>' +
         '<button class="button staff-submit" type="submit">Добавить материал</button></form>' +
         '<div class="section-footer">Сотрудники получат уведомление и смогут отмечать материал как изученный. Вы увидите прогресс каждого.</div>';
 }
@@ -177,7 +165,7 @@ function renderTrainings(d) {
     if (manager) {
         html += segmented("training", [{ id: "list", label: "Материалы" }, { id: "progress", label: "Прогресс" }, { id: "new", label: "Новый" }], trainingTab, "tr-tab:");
         if (trainingTab === "new")
-            return html + trainingForm(d) + "</div>";
+            return html + trainingForm() + "</div>";
         if (trainingTab === "progress") {
             return html + (trainingProgress ? trainingProgressView(trainingProgress) : '<div class="skeleton skeleton--block"></div><div class="skeleton skeleton--block"></div>') + "</div>";
         }
@@ -267,9 +255,6 @@ async function submitTraining() {
     const title = String(values.get("title") || "").trim();
     const body = String(values.get("body") || "").trim();
     const url = String(values.get("url") || "").trim();
-    const audience_branches = values.getAll("audience_branches").map(Number).filter(Number.isInteger);
-    const audience_positions = values.getAll("audience_positions").map(String);
-    const audience_employees = values.getAll("audience_employees").map(Number).filter(Number.isInteger);
     if (title.length < 2 || body.length < 2) {
         tg.showAlert("Укажите название и описание материала.");
         return;
@@ -280,7 +265,7 @@ async function submitTraining() {
         button.textContent = "Добавляем…";
     }
     try {
-        const result = await api("/trainings", { method: "POST", body: JSON.stringify({ title, body, url, audience_branches, audience_positions, audience_employees }) });
+        const result = await api("/trainings", { method: "POST", body: JSON.stringify({ title, body, url }) });
         if (!result.ok) {
             tg.showAlert(result.reason === "bad_url" ? "Укажите корректную ссылку с https://." : "Проверьте материал и попробуйте снова.");
             try {
@@ -686,63 +671,70 @@ function handleLearningAction(action) {
     return false;
 }
 let branchesData = null;
-let branchDetailData = null;
-function renderBranchDetail(d) {
-    let html = '<div class="screen"><button class="back-link" data-action="branch-detail-back">‹ Филиалы</button><div class="screen-title">' + esc(d.branch.name) + '</div>';
-    html += '<div class="screen-sub">Сотрудники по подразделениям</div>';
-    if (d.can_manage !== false) {
-      html += '<form class="section staff-form staff-form--card" id="branch-edit-form"><div class="staff-form-heading">Данные филиала</div>' +
-        '<label class="field"><span class="field-label">Название</span><input name="name" value="' + esc(d.branch.name) + '" maxlength="80" required></label>' +
-        '<label class="field"><span class="field-label">Адрес</span><input name="address" value="' + esc(d.branch.address || "") + '" maxlength="200"></label>' +
-        '<button class="button staff-submit" type="submit">Сохранить филиал</button></form>';
-    }
-    const groups = {};
-    d.employees.forEach((e) => { const pos = e.position || "Без должности"; groups[pos] ||= []; groups[pos].push(e); });
-    Object.entries(groups).forEach(([position, employees]) => {
-      html += `<div class="section-title">${esc(position)} · ${employees.length}</div><div class="section">`;
-      employees.forEach((e) => { html += cell({ icon: "user", title: e.name, subtitle: `${e.active ? "Активен" : "Неактивен"}${e.phone ? " · " + e.phone : ""}`, tappable: true, action: `team-edit:${e.id}` }); });
-      html += '</div>';
-    });
-    if (!d.employees.length) html += '<div class="section"><div class="empty">В этом филиале пока нет сотрудников</div></div>';
-    return html + '</div>';
-}
 function renderBranches(d) {
     let html = '<div class="screen"><button class="back-link" data-action="branches-back">‹ Назад</button><div class="screen-title">Филиалы</div>';
-    html += '<div class="screen-sub">Откройте филиал, чтобы изменить название и увидеть сотрудников по подразделениям.</div>';
+    html += '<div class="screen-sub">Аналитика сравнивает филиалы между собой.</div>';
     html += '<div class="section branch-list section--stagger">';
-    if (!d.branches.length) html += '<div class="empty">Филиалов пока нет</div>';
+    if (!d.branches.length)
+        html += '<div class="empty">Филиалов пока нет</div>';
     d.branches.forEach((b, i) => {
-        html += `<button type="button" class="cell cell--plain branch-row" style="--i:${i}" data-action="branch-open:${b.id}"><div class="cell-icon" data-i="branch">${icon("branch")}</div><div class="cell-body"><div class="cell-title">${esc(b.name)}</div><div class="cell-subtitle">${b.address ? esc(b.address) + " · " : ""}${b.staff} ${plural(b.staff, "сотрудник", "сотрудника", "сотрудников")}</div></div><span class="cell-chevron">${icon("chevron")}</span></button>`;
+        html += `<div class="cell cell--plain" style="--i:${i}"><div class="cell-icon" data-i="branch">${icon("branch")}</div><div class="cell-body"><div class="cell-title">${esc(b.name)}</div>` +
+            `<div class="cell-subtitle">${b.address ? esc(b.address) + " · " : ""}${b.staff} ${plural(b.staff, "сотрудник", "сотрудника", "сотрудников")}</div></div></div>`;
     });
-    html += '</div>';
+    html += "</div>";
     if (d.can_manage) {
-        html += '<div class="section-title">Добавить филиал</div><form class="section staff-form staff-form--card" id="branch-form">' +
+        html += '<div class="section-title">Добавить филиал</div>' +
+            '<form class="section staff-form staff-form--card" id="branch-form">' +
             '<label class="field"><span class="field-label">Название</span><input name="name" maxlength="80" placeholder="Например, Филиал Чиланзар" required></label>' +
             '<label class="field"><span class="field-label">Адрес</span><input name="address" maxlength="200" placeholder="Необязательно"></label>' +
-            '<button class="button staff-submit" type="submit">Добавить филиал</button></form>';
+            '<button class="button staff-submit" type="submit">Добавить филиал</button></form>' +
+            '<div class="section-footer">При добавлении сотрудника можно выбрать его филиал. Менеджеры видят только свой филиал, владелец и финансовый директор видят все.</div>';
     }
-    return html + '</div>';
+    return html + "</div>";
 }
-async function loadBranchDetail(id) {
-    root().innerHTML = skeleton(3);
+async function loadBranches() {
+    root().innerHTML = skeleton(2);
     try {
-      const d = await api("/branches/detail?id=" + id);
-      if (d.error) return void (root().innerHTML = errorState("Филиал не найден."));
-      d.can_manage = !!branchesData?.can_manage; branchDetailData = d; root().innerHTML = renderBranchDetail(d);
-    } catch (e) { root().innerHTML = errorState("Не удалось загрузить филиал. Проверьте связь."); }
+        const d = await api("/branches");
+        if (d.error)
+            return void (root().innerHTML = noAccess());
+        branchesData = d;
+        if (branchesMode)
+            root().innerHTML = renderBranches(d);
+    }
+    catch (e) {
+        root().innerHTML = errorState("Не удалось загрузить филиалы. Проверьте связь.");
+    }
 }
-async function submitBranchEdit() {
-    const form = root().querySelector("#branch-edit-form"); if (!form || !branchDetailData) return;
+async function submitBranch() {
+    const form = root().querySelector("#branch-form");
+    if (!form || !branchesMode)
+        return;
     const v = new FormData(form);
-    const r = await api("/branches/update", { method: "POST", body: JSON.stringify({ id: branchDetailData.branch.id, name: String(v.get("name") || "").trim(), address: String(v.get("address") || "").trim() }) });
-    if (!r.ok) return void tg.showAlert(r.reason === "duplicate" ? "Филиал с таким названием уже есть." : "Не удалось сохранить филиал.");
-    haptic("success"); void loadBranches();
+    const name = String(v.get("name") || "").trim();
+    if (name.length < 2)
+        return void tg.showAlert("Укажите название филиала.");
+    try {
+        const r = await api("/branches", { method: "POST", body: JSON.stringify({ name, address: String(v.get("address") || "").trim() }) });
+        if (!r.ok)
+            return void tg.showAlert(r.reason === "duplicate" ? "Филиал с таким названием уже есть." : "Проверьте название филиала.");
+        haptic("success");
+        void loadBranches();
+    }
+    catch (e) {
+        tg.showAlert("Не удалось добавить филиал. Проверьте связь.");
+    }
 }
 function handleBranchesAction(action) {
-    if (action === "branches") { branchesMode = true; branchDetailData = null; setOverlayControls(true); void loadBranches(); return true; }
-    if (action === "branches-back") { closeOverlay(); return true; }
-    if (action === "branch-detail-back") { void loadBranches(); return true; }
-    if (action.indexOf("branch-open:") === 0) { void loadBranchDetail(Number(action.slice(12))); return true; }
+    if (action === "branches") {
+        branchesMode = true;
+        setOverlayControls(true);
+        void loadBranches();
+        return true;
+    }
+    if (action === "branches-back") {
+        closeOverlay();
+        return true;
+    }
     return false;
 }
-
