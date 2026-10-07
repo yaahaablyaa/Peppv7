@@ -114,12 +114,16 @@ function audienceText(list: string[] | undefined): string {
   return list && list.length ? list.join(", ") : "Все сотрудники";
 }
 
-function audienceField(key: string, positions: string[]): string {
+const audienceLocked: Record<string, boolean> = {};
+
+function audienceField(key: string, positions: string[], lockAll?: boolean): string {
   audienceList[key] = positions;
+  audienceLocked[key] = !!lockAll;
   if (!audienceState[key]) audienceState[key] = [];
+  if (lockAll && !audienceState[key].length) audienceState[key] = positions.slice();
   const sel = audienceState[key];
   return `<div class="field field--aud" data-aud-box="${key}"><span class="field-label">Кому видно</span><div class="chips">` +
-    `<button type="button" class="chip${sel.length ? "" : " chip--on"}" data-action="aud:${key}:all">Все</button>` +
+    (lockAll ? "" : `<button type="button" class="chip${sel.length ? "" : " chip--on"}" data-action="aud:${key}:all">Все</button>`) +
     positions.map((p, i) => `<button type="button" class="chip${sel.indexOf(p) >= 0 ? " chip--on" : ""}" data-action="aud:${key}:${i}">${esc(p)}</button>`).join("") +
     `</div><div class="aud-hint" data-aud-hint="${key}">${esc(audienceHint(sel))}</div></div>`;
 }
@@ -133,7 +137,7 @@ function handleAudienceAction(action: string): boolean {
   const [, key, which] = action.split(":");
   const list = audienceList[key] || [];
   const sel = audienceState[key] || (audienceState[key] = []);
-  if (which === "all") sel.length = 0;
+  if (which === "all") { if (audienceLocked[key]) return true; sel.length = 0; }
   else {
     const name = list[Number(which)];
     if (name) { const at = sel.indexOf(name); if (at >= 0) sel.splice(at, 1); else sel.push(name); }
@@ -165,6 +169,7 @@ interface TrainingProgressData {
 let trainingTab: TrainingTab = "list";
 let trainingProgress: TrainingProgressData | null = null;
 let trainingBusy = false;
+let trainingEditId = 0;
 
 function trainingCard(t: Training, manager: boolean, index: number): string {
   const open = t.url ? `<button type="button" class="chip-btn" data-action="training-open:${t.id}">Открыть материал</button>` : "";
@@ -176,23 +181,26 @@ function trainingCard(t: Training, manager: boolean, index: number): string {
   }
   const toggle = manager ? "" :
     `<button type="button" class="check-btn${t.done ? " check-btn--on" : ""}" data-action="tr-done:${t.id}" aria-label="Отметить изученным"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></button>`;
+  const edit = manager ? `<button type="button" class="icon-btn" data-action="tr-edit:${t.id}" aria-label="Редактировать материал"><svg viewBox="0 0 24 24"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z"/><path d="m13.5 8.5 3 3"/></svg></button>` : "";
   const del = manager ? `<button type="button" class="icon-btn icon-btn--danger" data-action="tr-delete:${t.id}" aria-label="Удалить материал"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4.5h4V7M7 7l1 12.5h8L17 7"/></svg></button>` : "";
   return `<div class="tr-card${t.done ? " tr-card--done" : ""}" style="--i:${index}">` +
     '<div class="tr-head">' +
-    `<div class="tr-title">${esc(t.title)}</div>${toggle}${del}</div>` +
+    `<div class="tr-title">${esc(t.title)}</div>${toggle}${edit}${del}</div>` +
     (manager ? audienceTag(t.audience) : "") + `<div class="tr-body">${esc(t.body)}</div>` +
     `<div class="tr-foot">${open}${t.done && t.completed_at ? `<span class="tr-done-at">Изучено ${esc(humanDate(t.completed_at.slice(0, 10)))}</span>` : ""}</div>` +
     tail + "</div>";
 }
 
 function trainingForm(): string {
+  const t = trainingEditId && trainingsData ? trainingsData.trainings.find((x) => x.id === trainingEditId) : undefined;
   return '<form class="section staff-form staff-form--card" id="training-form">' +
-    '<div class="staff-form-heading">Новый материал</div>' +
+    `<div class="staff-form-heading">${t ? "Редактирование материала" : "Новый материал"}</div>` +
     audienceField("tr", (trainingsData && trainingsData.positions) || []) +
-    '<label class="field"><span class="field-label">Название</span><input name="title" maxlength="120" placeholder="Например, Стандарты сервиса" required></label>' +
-    '<label class="field"><span class="field-label">Описание</span><textarea name="body" maxlength="4000" placeholder="Кратко опишите, что нужно изучить" required></textarea></label>' +
-    '<label class="field"><span class="field-label">Ссылка на материал</span><input name="url" type="url" inputmode="url" maxlength="2048" placeholder="https://... (необязательно)"></label>' +
-    '<button class="button staff-submit" type="submit">Добавить материал</button></form>' +
+    `<label class="field"><span class="field-label">Название</span><input name="title" maxlength="120" placeholder="Например, Стандарты сервиса" value="${t ? esc(t.title) : ""}" required></label>` +
+    `<label class="field"><span class="field-label">Описание</span><textarea name="body" maxlength="4000" placeholder="Кратко опишите, что нужно изучить" required>${t ? esc(t.body) : ""}</textarea></label>` +
+    `<label class="field"><span class="field-label">Ссылка на материал</span><input name="url" type="url" inputmode="url" maxlength="2048" placeholder="https://... (необязательно)" value="${t ? esc(t.url) : ""}"></label>` +
+    `<button class="button staff-submit" type="submit">${t ? "Сохранить" : "Добавить материал"}</button>` +
+    (t ? '<button type="button" class="button button--secondary staff-cancel" data-action="tr-edit-cancel">Отмена</button>' : "") + '</form>' +
     '<div class="section-footer">Материал увидят только выбранные должности (менеджеры видят всё). Они получат уведомление и смогут отмечать его изученным, а вы увидите прогресс каждого.</div>';
 }
 
@@ -302,7 +310,7 @@ async function submitTraining(): Promise<void> {
   const button = form.querySelector<HTMLButtonElement>(".staff-submit");
   if (button) { button.disabled = true; button.textContent = "Добавляем…"; }
   try {
-    const result = await api<TrainingResult>("/trainings", { method: "POST", body: JSON.stringify({ title, body, url, positions: audienceState.tr || [] }) });
+    const result = await api<TrainingResult>(trainingEditId ? "/trainings/update" : "/trainings", { method: "POST", body: JSON.stringify({ id: trainingEditId || undefined, title, body, url, positions: audienceState.tr || [] }) });
     if (!result.ok) {
       tg.showAlert(result.reason === "bad_url" ? "Укажите корректную ссылку с https://." : "Проверьте материал и попробуйте снова.");
       try { tg.HapticFeedback.notificationOccurred("error"); } catch (e) { /* ignore */ }
@@ -310,13 +318,14 @@ async function submitTraining(): Promise<void> {
     }
     try { tg.HapticFeedback.notificationOccurred("success"); } catch (e) { /* ignore */ }
     trainingTab = "list";
+    trainingEditId = 0;
     audienceState.tr = [];
     void loadTrainings();
   } catch (err) {
     tg.showAlert("Не удалось добавить материал. Проверьте связь.");
     try { tg.HapticFeedback.notificationOccurred("error"); } catch (e) { /* ignore */ }
   } finally {
-    if (button) { button.disabled = false; button.textContent = "Добавить материал"; }
+    if (button) { button.disabled = false; button.textContent = trainingEditId ? "Сохранить" : "Добавить материал"; }
   }
 }
 
@@ -345,6 +354,7 @@ let checklistDate = "";
 let checklistPositions: string[] = [];
 let checklistChoices: string[] = [];
 let checklistBusy = false;
+let checklistEditId = 0;
 
 function checklistCard(c: Checklist, index: number): string {
   const total = c.items.length;
@@ -366,15 +376,17 @@ function checklistCard(c: Checklist, index: number): string {
 
 function checklistForm(positions: string[]): string {
   checklistChoices = positions;
+  const c = checklistEditId && checklistReport ? checklistReport.checklists.find((x) => x.id === checklistEditId) : undefined;
   return '<form class="section staff-form staff-form--card" id="checklist-form">' +
-    '<div class="staff-form-heading">Новый чек-лист</div>' +
-    '<label class="field"><span class="field-label">Название</span><input name="title" maxlength="120" placeholder="Например, Открытие смены" required></label>' +
-    '<label class="field"><span class="field-label">Задачи</span><textarea name="items" maxlength="7200" placeholder="Каждая задача — с новой строки" required></textarea></label>' +
+    `<div class="staff-form-heading">${c ? "Редактирование чек-листа" : "Новый чек-лист"}</div>` +
+    `<label class="field"><span class="field-label">Название</span><input name="title" maxlength="120" placeholder="Например, Открытие смены" value="${c ? esc(c.title) : ""}" required></label>` +
+    `<label class="field"><span class="field-label">Задачи</span><textarea name="items" maxlength="7200" placeholder="Каждая задача — с новой строки" required>${c ? esc(c.items.join("\n")) : ""}</textarea></label>` +
     '<div class="field"><span class="field-label">Для кого</span><div class="chips">' +
     `<button type="button" class="chip${checklistPositions.length ? "" : " chip--on"}" data-action="cl-pos:all">Все</button>` +
     positions.map((p, i) => `<button type="button" class="chip${checklistPositions.indexOf(p) >= 0 ? " chip--on" : ""}" data-action="cl-pos:${i}">${esc(p)}</button>`).join("") +
     "</div></div>" +
-    '<button class="button staff-submit" type="submit">Создать чек-лист</button></form>' +
+    `<button class="button staff-submit" type="submit">${c ? "Сохранить" : "Создать чек-лист"}</button>` +
+    (c ? '<button type="button" class="button button--secondary staff-cancel" data-action="cl-edit-cancel">Отмена</button>' : "") + '</form>' +
     '<div class="section-footer">Сотрудники получат уведомление. Каждый день чек-лист начинается заново, а вы видите, кто и какие задачи выполнил.</div>';
 }
 
@@ -417,7 +429,7 @@ function checklistReportView(r: ChecklistReportData): string {
     const s = c.summary;
     html += `<div class="rep-card" style="--i:${ci}"><div class="rep-head"><div><div class="rep-title">${esc(c.title)}</div>` +
       `<div class="rep-aud">${c.positions.length ? "Для: " + esc(c.positions.join(", ")) : "Для всех сотрудников"} · ${c.items.length} ${plural(c.items.length, "задача", "задачи", "задач")}</div></div>` +
-      `<button type="button" class="icon-btn icon-btn--danger" data-action="cl-delete:${c.id}" aria-label="Удалить чек-лист"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4.5h4V7M7 7l1 12.5h8L17 7"/></svg></button></div>` +
+      `<div class="rep-btns"><button type="button" class="icon-btn" data-action="cl-edit:${c.id}" aria-label="Редактировать чек-лист"><svg viewBox="0 0 24 24"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z"/><path d="m13.5 8.5 3 3"/></svg></button><button type="button" class="icon-btn icon-btn--danger" data-action="cl-delete:${c.id}" aria-label="Удалить чек-лист"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4.5h4V7M7 7l1 12.5h8L17 7"/></svg></button></div></div>` +
       `<div class="rep-sum"><span>Выполнили ${s.complete} из ${s.total}</span><span>Начали ${s.started}</span></div>${bar(pct(s.complete, s.total), s.total && s.complete === s.total ? "good" : "")}`;
     if (!c.people.length) html += '<div class="empty">Нет сотрудников для этого чек-листа</div>';
     else html += '<div class="rep-people">' + c.people.map((p, i) => reportPerson(c, p, i)).join("") + "</div>" +
@@ -520,9 +532,9 @@ async function submitChecklist(): Promise<void> {
   const button = form.querySelector<HTMLButtonElement>(".staff-submit");
   if (button) { button.disabled = true; button.textContent = "Создаём…"; }
   try {
-    const result = await api<ChecklistResult>("/checklists", {
+    const result = await api<ChecklistResult>(checklistEditId ? "/checklists/update" : "/checklists", {
       method: "POST",
-      body: JSON.stringify({ title, items, positions: checklistPositions }),
+      body: JSON.stringify({ id: checklistEditId || undefined, title, items, positions: checklistPositions }),
     });
     if (!result.ok) {
       tg.showAlert("Проверьте название и список задач.");
@@ -531,13 +543,14 @@ async function submitChecklist(): Promise<void> {
     }
     try { tg.HapticFeedback.notificationOccurred("success"); } catch (e) { /* ignore */ }
     checklistPositions = [];
+    checklistEditId = 0;
     checklistTab = "report";
     void loadChecklists();
   } catch (err) {
     tg.showAlert("Не удалось создать чек-лист. Проверьте связь.");
     try { tg.HapticFeedback.notificationOccurred("error"); } catch (e) { /* ignore */ }
   } finally {
-    if (button) { button.disabled = false; button.textContent = "Создать чек-лист"; }
+    if (button) { button.disabled = false; button.textContent = checklistEditId ? "Сохранить" : "Создать чек-лист"; }
   }
 }
 
@@ -570,11 +583,18 @@ function handleLearningAction(action: string): boolean {
   if (action.indexOf("tr-tab:") === 0) {
     const tab = action.slice(7) as TrainingTab;
     if (tab !== "list" && tab !== "progress" && tab !== "new") return true;
+    if (tab === "new" && trainingTab !== "new") { trainingEditId = 0; audienceState.tr = []; }
     trainingTab = tab;
     haptic("light");
     if (tab === "progress") void loadTrainings(false); else if (trainingsData) rerender(renderTrainings(trainingsData));
     return true;
   }
+  if (action.indexOf("tr-edit:") === 0 && trainingsData) {
+    const t = trainingsData.trainings.find((x) => x.id === Number(action.slice(8)));
+    if (t) { trainingEditId = t.id; audienceState.tr = (t.audience || []).slice(); trainingTab = "new"; haptic("light"); rerender(renderTrainings(trainingsData)); root().scrollTop = 0; }
+    return true;
+  }
+  if (action === "tr-edit-cancel" && trainingsData) { trainingEditId = 0; audienceState.tr = []; trainingTab = "list"; rerender(renderTrainings(trainingsData)); return true; }
   if (action.indexOf("tr-done:") === 0) { void toggleTraining(Number(action.slice(8))); return true; }
   if (action.indexOf("tr-delete:") === 0) { deleteTraining(Number(action.slice(10))); return true; }
   if (action.indexOf("tr-emp:") === 0 || action.indexOf("cl-emp:") === 0) {
@@ -591,6 +611,7 @@ function handleLearningAction(action: string): boolean {
   if (action.indexOf("cl-tab:") === 0) {
     const tab = action.slice(7) as ChecklistTab;
     if (tab !== "report" && tab !== "mine" && tab !== "new") return true;
+    if (tab === "new" && checklistTab !== "new") { checklistEditId = 0; checklistPositions = []; }
     checklistTab = tab;
     haptic("light");
     if (tab === "report") void loadChecklists(false); else if (checklistData) rerender(renderChecklists(checklistData));
@@ -606,6 +627,12 @@ function handleLearningAction(action: string): boolean {
     void loadChecklistReport().then(() => { if (checklistData && checklistsMode) rerender(renderChecklists(checklistData)); });
     return true;
   }
+  if (action.indexOf("cl-edit:") === 0 && checklistReport && checklistData) {
+    const c = checklistReport.checklists.find((x) => x.id === Number(action.slice(8)));
+    if (c) { checklistEditId = c.id; checklistPositions = c.positions.slice(); checklistTab = "new"; haptic("light"); rerender(renderChecklists(checklistData)); root().scrollTop = 0; }
+    return true;
+  }
+  if (action === "cl-edit-cancel" && checklistData) { checklistEditId = 0; checklistPositions = []; checklistTab = "report"; rerender(renderChecklists(checklistData)); return true; }
   if (action.indexOf("cl-delete:") === 0) { deleteChecklist(Number(action.slice(10))); return true; }
   if (action.indexOf("cl-pos:") === 0) {
     const key = action.slice(7);

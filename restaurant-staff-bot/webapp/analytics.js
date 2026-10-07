@@ -1,5 +1,6 @@
 "use strict";
 /** Manager analytics: two pay periods (1–15, 16–end) and the whole month. */
+let analyticsSection = "summary";
 let analyticsMonth = uzbekistanToday().slice(0, 7);
 let analyticsView = Number(uzbekistanToday().slice(8, 10)) <= 15 ? "p1" : "p2";
 let analyticsBranch = "all";
@@ -62,22 +63,13 @@ function analyticsEmployees(d) {
         `<div class="an-tags">${e.late ? `<span class="tag tag--warn">опозданий ${e.late}</span>` : ""}${e.missing ? `<span class="tag tag--bad">прогулов ${e.missing}</span>` : ""}${e.punctuality !== null && !e.late && !e.missing ? '<span class="tag tag--good">без замечаний</span>' : ""}</div>` +
         "</div></div>").join("") + "</div>";
 }
-function renderAnalytics(d) {
+function analyticsSummary(d) {
     const t = d.totals;
     const prev = d.previous ? d.previous.totals : null;
     const money = d.payroll_visible;
     const view = (d.view || analyticsView);
     const range = `${humanDate(d.start)} — ${humanDate(d.end)}`;
-    let html = '<div class="screen screen--wide"><button class="back-link" data-action="analytics-back">‹ Назад</button><div class="screen-title">Аналитика</div>';
-    html += '<div class="screen-sub">Показатели команды по расчётным периодам.</div>';
-    html += '<div class="toolbar"><div class="month-nav"><button class="nav-arrow" data-action="an-month:-1" type="button" aria-label="Предыдущий месяц"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
-        `<div class="month-name">${esc(monthTitle(d.month || analyticsMonth))}</div>` +
-        '<button class="nav-arrow" data-action="an-month:1" type="button" aria-label="Следующий месяц"${(d.month || analyticsMonth) >= uzbekistanToday().slice(0, 7) ? " disabled" : ""}><svg viewBox="0 0 24 24" width="20" height="20"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>';
-    html += segmented("analytics", [{ id: "p1", label: "1–15" }, { id: "p2", label: "16–конец" }, { id: "full", label: "Месяц" }], view, "an-view:") + "</div>";
-    if (d.filters.branches.length > 1) {
-        html += '<div class="chips chips--scroll"><button type="button" class="chip' + (analyticsBranch === "all" ? " chip--on" : "") + '" data-action="an-branch:all">Все филиалы</button>' +
-            d.filters.branches.map((b) => `<button type="button" class="chip${analyticsBranch === String(b.id) ? " chip--on" : ""}" data-action="an-branch:${b.id}">${esc(b.name)}</button>`).join("") + "</div>";
-    }
+    let html = "";
     const main = money ? t.cost || 0 : t.hours;
     const prevMain = prev ? (money ? prev.cost || 0 : prev.hours) : null;
     html += `<div class="hero hero--grad"><div class="hero-label">${esc(viewLabel(view))} · ${esc(range)}</div>` +
@@ -102,7 +94,137 @@ function renderAnalytics(d) {
     html += segmented("analytics-sort", [{ id: "hours", label: "Часы" }, { id: "late", label: "Опоздания" }, { id: "missing", label: "Прогулы" }], analyticsSort, "an-sort:");
     html += analyticsEmployees(d);
     html += `<div class="section-footer">Расчётные периоды: 1–15 число (выплата 25-го), 16 число — конец месяца (выплата 10-го следующего месяца). Считаются только закрытые смены.${money ? "" : " Суммы по зарплате видит только владелец."}</div>`;
+    return html;
+}
+const SECTION_TABS = [
+    { id: "summary", label: "Сводка" }, { id: "payroll", label: "ФОТ" }, { id: "load", label: "Загруженность" },
+    { id: "discipline", label: "Дисциплина" }, { id: "recs", label: "Рекомендации" },
+];
+function renderAnalytics(d) {
+    const view = (d.view || analyticsView);
+    const arrowL = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    const arrowR = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    const monthKey = d.month || analyticsMonth;
+    let html = '<div class="screen screen--wide"><button class="back-link" data-action="analytics-back">‹ Назад</button><div class="screen-title">Аналитика</div>';
+    html += '<div class="screen-sub">Показатели команды по расчётным периодам.</div>';
+    html += `<div class="toolbar"><div class="month-nav"><button class="nav-arrow" data-action="an-month:-1" type="button" aria-label="Предыдущий месяц">${arrowL}</button><div class="month-name">${esc(monthTitle(monthKey))}</div>` +
+        `<button class="nav-arrow" data-action="an-month:1" type="button" aria-label="Следующий месяц"${monthKey >= uzbekistanToday().slice(0, 7) ? " disabled" : ""}>${arrowR}</button></div>` +
+        segmented("analytics", [{ id: "p1", label: "1–15" }, { id: "p2", label: "16–конец" }, { id: "full", label: "Месяц" }], view, "an-view:") + "</div>";
+    if (d.filters.branches.length > 1) {
+        html += '<div class="chips chips--scroll"><button type="button" class="chip' + (analyticsBranch === "all" ? " chip--on" : "") + '" data-action="an-branch:all">Все филиалы</button>' +
+            d.filters.branches.map((b) => `<button type="button" class="chip${analyticsBranch === String(b.id) ? " chip--on" : ""}" data-action="an-branch:${b.id}">${esc(b.name)}</button>`).join("") + "</div>";
+    }
+    const issues = d.sections.recommendations.filter((r) => r.level === "bad" || r.level === "warn").length;
+    html += '<div class="sec-tabs" role="tablist">' + SECTION_TABS.map((tab) => `<button type="button" role="tab" class="sec-tab${analyticsSection === tab.id ? " sec-tab--on" : ""}" data-action="an-sec:${tab.id}">${tab.label}${tab.id === "recs" && issues ? `<b class="sec-badge">${issues}</b>` : ""}</button>`).join("") + "</div>";
+    html += '<div class="sec-body">';
+    if (analyticsSection === "summary")
+        html += analyticsSummary(d);
+    else if (analyticsSection === "payroll")
+        html += sectionPayroll(d);
+    else if (analyticsSection === "load")
+        html += sectionLoad(d);
+    else if (analyticsSection === "discipline")
+        html += sectionDiscipline(d);
+    else
+        html += sectionRecs(d);
+    html += "</div>";
     return html + "</div>";
+}
+function statBox(value, label, bad, count) {
+    return `<div class="stat"><div class="stat-value${bad ? " stat-value--bad" : ""}"${count ? " " + count : ""}>${value}</div><div class="stat-label">${label}</div></div>`;
+}
+function barRows(rows) {
+    return '<div class="section section--stagger">' + rows.map((r, i) => `<div class="row-bar" style="--i:${i}"><div class="row-bar-top"><span class="row-bar-title">${esc(r.title)}</span><span class="row-bar-val">${r.value}</span></div>${r.sub ? `<div class="an-emp-sub">${esc(r.sub)}</div>` : ""}${bar(r.percent, r.tone)}</div>`).join("") + "</div>";
+}
+function weekdayChart(values, unit) {
+    const max = Math.max(1, ...values.map((x) => x.v));
+    return '<div class="section chart-card"><div class="wd-bars">' + values.map((x, i) => `<div class="wd-col${x.hot ? " wd-col--hot" : ""}"><span class="wd-val">${x.v ? fmtNum(x.v) : ""}</span><div class="wd-track"><div class="wd-fill" style="--h:${Math.max(x.v ? 5 : 0, Math.round(x.v / max * 100))}%;--d:${i * 40}ms"></div></div><span class="wd-label">${x.label}</span></div>`).join("") +
+        `</div><div class="chart-note">${unit}</div></div>`;
+}
+function fmtNum(n) { return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(n); }
+function sectionPayroll(d) {
+    const p = d.sections.payroll;
+    let html = "";
+    if (!p.visible) {
+        html += '<div class="section note-card"><div class="note-title">Суммы скрыты</div><div class="note-text">Зарплатные суммы видят только владелец и финансовый директор. Ниже показаны часы.</div></div>';
+        html += '<div class="stat-grid">' + statBox(hoursText(p.hours), "Отработано") + statBox(hoursText(p.planned_hours), "Запланировано") + "</div>";
+        if (p.by_position.length)
+            html += '<div class="section-title">Часы по должностям</div>' + barRows(p.by_position.map((x) => ({ title: `${x.position} · ${x.staff}`, value: hoursText(x.hours), percent: pct(x.hours, Math.max(1, ...p.by_position.map((y) => y.hours))) })));
+        return html;
+    }
+    const total = p.total || 0;
+    const change = p.prev_total ? Math.round((total - p.prev_total) / p.prev_total * 100) : null;
+    html += `<div class="hero hero--grad"><div class="hero-label">ФОТ за период · ${esc(humanDate(d.start))} — ${esc(humanDate(d.end))}</div><div class="hero-value" ${countAttr(total, "money")}>${esc(money(total))}</div>` +
+        `<div class="hero-sub">${change === null ? "Нет данных для сравнения" : `К прошлому периоду <span class="delta ${change > 0 ? "delta--bad" : "delta--good"}">${change > 0 ? "▲" : "▼"} ${Math.abs(change)}%</span>`}</div></div>`;
+    html += '<div class="stat-grid">' +
+        statBox(esc(money(p.forecast || 0)), p.is_forecast ? "Прогноз до конца периода" : "Итог периода") +
+        statBox(esc(money(p.avg_hour || 0)), "Средняя стоимость часа") +
+        statBox(hoursText(p.hours), "Отработано") + statBox(hoursText(p.planned_hours), "Запланировано") + "</div>";
+    html += analyticsChart(d);
+    if (p.by_branch && p.by_branch.length > 1) {
+        const max = Math.max(1, ...p.by_branch.map((b) => b.cost || 0));
+        html += '<div class="section-title">По филиалам</div>' + barRows(p.by_branch.map((b) => ({ title: b.name, sub: `${b.staff} чел. · ${hoursText(b.hours)}`, value: esc(money(b.cost || 0)), percent: pct(b.cost || 0, max) })));
+    }
+    if (p.by_position.length) {
+        const max = Math.max(1, ...p.by_position.map((x) => x.cost || 0));
+        html += '<div class="section-title">По должностям</div>' + barRows(p.by_position.slice().sort((a, b) => (b.cost || 0) - (a.cost || 0)).map((x) => ({ title: `${x.position} · ${x.staff}`, sub: hoursText(x.hours), value: esc(money(x.cost || 0)), percent: pct(x.cost || 0, max) })));
+    }
+    if (p.top && p.top.length) {
+        const max = Math.max(1, ...p.top.map((x) => x.cost));
+        html += '<div class="section-title">Больше всего начислено</div>' + barRows(p.top.map((x) => ({ title: x.name, sub: `${x.position || "Сотрудник"} · ${hoursText(x.hours)}`, value: esc(money(x.cost)), percent: pct(x.cost, max) })));
+    }
+    return html;
+}
+function sectionLoad(d) {
+    const l = d.sections.load;
+    let html = '<div class="stat-grid">' +
+        statBox(l.utilization === null ? "—" : l.utilization + "%", "Выполнено от плана", l.utilization !== null && l.utilization < 85, l.utilization === null ? "" : countAttr(l.utilization, "pct")) +
+        statBox(hoursText(l.actual_hours), "Отработано") + statBox(hoursText(l.planned_hours), "Запланировано на период") +
+        statBox(String(l.zero_days.length), "Дней без смен", l.zero_days.length > 0, countAttr(l.zero_days.length, "int")) + "</div>";
+    html += '<div class="section-title">Сколько человек на смене по дням недели</div>' +
+        weekdayChart(l.weekday.map((w) => ({ label: w.label, v: w.avg_staff, hot: !!l.peak && w.label === l.peak.label && w.avg_staff > 0 })), l.peak ? `В среднем на смене. Пик: ${l.peak.label} (${fmtNum(l.peak.avg_staff)})` : "Нет смен в периоде");
+    if (l.overloaded.length || l.underloaded.length) {
+        html += '<div class="section-title">Баланс нагрузки</div><div class="section section--stagger">' +
+            l.overloaded.map((e, i) => `<div class="an-emp" style="--i:${i}">${avatar(e.name)}<div class="an-emp-main"><div class="an-emp-top"><span class="an-emp-name">${esc(e.name)}</span><span class="tag tag--bad">+${e.over}% к среднему</span></div><div class="an-emp-sub">${hoursText(e.hours)} при среднем ${hoursText(l.avg_hours)}</div></div></div>`).join("") +
+            l.underloaded.map((e, i) => `<div class="an-emp" style="--i:${i + l.overloaded.length}">${avatar(e.name)}<div class="an-emp-main"><div class="an-emp-top"><span class="an-emp-name">${esc(e.name)}</span><span class="tag tag--warn">−${e.under}% к среднему</span></div><div class="an-emp-sub">${hoursText(e.hours)} при среднем ${hoursText(l.avg_hours)}</div></div></div>`).join("") + "</div>";
+    }
+    if (l.people.length) {
+        const max = Math.max(1, ...l.people.map((x) => Math.max(x.hours, x.planned_hours)));
+        html += '<div class="section-title">Часы по сотрудникам</div>' + barRows(l.people.map((x) => ({ title: x.name, sub: `План ${hoursText(x.planned_hours)}`, value: hoursText(x.hours), percent: pct(x.hours, max) })));
+    }
+    if (l.zero_days.length)
+        html += `<div class="section-footer">Дни без назначенных смен: ${l.zero_days.slice(0, 8).map((x) => esc(humanDate(x))).join(", ")}${l.zero_days.length > 8 ? " и другие" : ""}.</div>`;
+    return html;
+}
+function sectionDiscipline(d) {
+    const x = d.sections.discipline;
+    let html = '<div class="stat-grid">' +
+        statBox(x.punctuality === null ? "—" : x.punctuality + "%", "Приходят вовремя", x.punctuality !== null && x.punctuality < 90, x.punctuality === null ? "" : countAttr(x.punctuality, "pct")) +
+        statBox(String(x.late), `Опозданий${x.avg_late ? ` · в среднем ${x.avg_late} мин` : ""}`, x.late > 0, countAttr(x.late, "int")) +
+        statBox(String(x.missing), "Прогулов", x.missing > 0, countAttr(x.missing, "int")) +
+        statBox(x.attendance_rate === null ? "—" : x.attendance_rate + "%", "Выходов от графика") + "</div>";
+    const maxLate = Math.max(...x.weekday.map((w) => w.late + w.missing));
+    html += '<div class="section-title">Опоздания и прогулы по дням недели</div>' +
+        weekdayChart(x.weekday.map((w) => ({ label: w.label, v: w.late + w.missing, hot: maxLate > 0 && w.late + w.missing === maxLate })), "Опоздания и прогулы вместе");
+    if (x.worst.length) {
+        html += '<div class="section-title">Требуют внимания</div><div class="section section--stagger">' + x.worst.map((e, i) => `<div class="an-emp" style="--i:${i}">${avatar(e.name)}<div class="an-emp-main"><div class="an-emp-top"><span class="an-emp-name">${esc(e.name)}</span></div><div class="an-emp-sub">${esc(e.position || "Сотрудник")}${e.late_minutes ? " · опоздал на " + e.late_minutes + " мин суммарно" : ""}</div>` +
+            `<div class="an-tags">${e.late ? `<span class="tag tag--warn">опозданий ${e.late}</span>` : ""}${e.missing ? `<span class="tag tag--bad">прогулов ${e.missing}</span>` : ""}</div></div></div>`).join("") + "</div>";
+    }
+    else {
+        html += '<div class="section note-card"><div class="note-title">Замечаний нет</div><div class="note-text">В этом периоде нет опозданий и прогулов.</div></div>';
+    }
+    if (x.best.length) {
+        html += '<div class="section-title">Без замечаний</div><div class="section section--stagger">' + x.best.map((e, i) => `<div class="an-emp" style="--i:${i}">${avatar(e.name)}<div class="an-emp-main"><div class="an-emp-top"><span class="an-emp-name">${esc(e.name)}</span><span class="tag tag--good">${e.attended} ${plural(e.attended, "смена", "смены", "смен")}</span></div><div class="an-emp-sub">${esc(e.position || "Сотрудник")}</div></div></div>`).join("") + "</div>";
+    }
+    return html;
+}
+function sectionRecs(d) {
+    const recs = d.sections.recommendations;
+    const icons = { bad: "!", warn: "!", good: "✓", info: "i" };
+    const order = { bad: 0, warn: 1, info: 2, good: 3 };
+    const sorted = recs.slice().sort((a, b) => order[a.level] - order[b.level]);
+    return '<div class="recs">' + sorted.map((r, i) => `<div class="rec rec--${r.level}" style="--i:${i}"><span class="rec-ico">${icons[r.level]}</span><div class="rec-main"><div class="rec-title">${esc(r.title)}</div><div class="rec-text">${esc(r.text)}</div></div></div>`).join("") +
+        '</div><div class="section-footer">Рекомендации составляются автоматически по графику, отметкам прихода и ФОТ за выбранный период.</div>';
 }
 function money_(v) { return money(v); }
 function handleAnalyticsAction(action) {
@@ -131,6 +253,19 @@ function handleAnalyticsAction(action) {
         analyticsBranch = action.slice(10);
         haptic("light");
         void loadAnalyticsKeep();
+        return true;
+    }
+    if (action.indexOf("an-sec:") === 0) {
+        const id = action.slice(7);
+        if (!SECTION_TABS.some((t) => t.id === id))
+            return true;
+        analyticsSection = id;
+        haptic("light");
+        if (analyticsData)
+            rerender(renderAnalytics(analyticsData));
+        const tab = root().querySelector(".sec-tab--on");
+        if (tab && tab.scrollIntoView)
+            tab.scrollIntoView({ block: "nearest", inline: "center" });
         return true;
     }
     if (action.indexOf("an-sort:") === 0) {

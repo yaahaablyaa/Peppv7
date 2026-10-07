@@ -365,14 +365,12 @@ function renderTeam(d) {
         html += '<div class="empty">Сотрудников пока нет</div>';
     }
     else {
-        d.employees.forEach((employee) => {
-            html += cell({
-                icon: "user",
-                title: employee.name,
-                subtitle: `${esc(employee.position)} · ${employee.active ? "Активен" : "Неактивен"}`,
-                tappable: true,
-                action: `team-edit:${employee.id}`,
-            });
+        d.employees.forEach((employee, i) => {
+            const thumb = employee.qr_code
+                ? `<span class="qr-thumb"><img src="${esc(employee.qr_code)}" alt="QR-код ${esc(employee.name)}" loading="lazy"><i>QR</i></span>`
+                : `<span class="qr-thumb qr-thumb--empty" title="QR-код не загружен">${icon("qr")}</span>`;
+            html += `<button type="button" class="cell cell--tappable team-row" data-action="team-edit:${employee.id}" style="--i:${Math.min(i, 10)}">${thumb}` +
+                `<div class="cell-body"><div class="cell-title">${esc(employee.name)}</div><div class="cell-subtitle">${esc(employee.position)} · ${employee.active ? "Активен" : "Неактивен"}${employee.qr_code ? "" : " · нет QR"}</div></div><span class="inv-chev">${icon("chevron")}</span></button>`;
         });
     }
     return html + '</div></div>';
@@ -632,7 +630,7 @@ function swipeBlocked(target) {
 function initSwipe() {
     const el = root();
     const order = TABS.map((t) => t.id);
-    let startX = 0, startY = 0, startT = 0, dx = 0;
+    let startX = 0, startY = 0, startT = 0, dx = 0, lastX = 0, lastT = 0, velocity = 0;
     let mode = "idle";
     let screen = null;
     const reset = (animate) => {
@@ -640,7 +638,7 @@ function initSwipe() {
             return;
         const node = screen;
         if (animate) {
-            node.style.transition = "transform .32s cubic-bezier(.34,1.36,.5,1), opacity .25s ease";
+            node.style.transition = "transform .3s cubic-bezier(.2,.9,.25,1), opacity .22s ease";
             node.style.transform = "";
             node.style.opacity = "";
             window.setTimeout(() => { node.style.transition = ""; }, 340);
@@ -667,6 +665,9 @@ function initSwipe() {
         startY = t.clientY;
         startT = Date.now();
         dx = 0;
+        lastX = t.clientX;
+        lastT = startT;
+        velocity = 0;
         mode = "pending";
     }, { passive: true });
     el.addEventListener("touchmove", (e) => {
@@ -690,13 +691,21 @@ function initSwipe() {
             }
         }
         dx = mx;
+        const now = Date.now();
+        if (now - lastT > 0)
+            velocity = velocity * 0.6 + ((t.clientX - lastX) / (now - lastT)) * 0.4;
+        lastX = t.clientX;
+        lastT = now;
         if (!screen)
             return;
         const i = order.indexOf(activeTab);
         const blocked = (dx < 0 && i >= order.length - 1) || (dx > 0 && i <= 0);
-        const eased = blocked ? dx * 0.18 : dx * 0.55;
-        screen.style.transform = `translate3d(${eased}px,0,0)`;
-        screen.style.opacity = String(1 - Math.min(Math.abs(eased) / 420, 0.4));
+        // Follows the finger almost 1:1, with a soft limit; at the ends it resists like a rubber band.
+        const limit = window.innerWidth * 0.5;
+        const soft = limit * (1 - Math.exp(-Math.abs(dx) / limit));
+        const eased = (dx < 0 ? -1 : 1) * (blocked ? soft * 0.25 : soft);
+        screen.style.transform = `translate3d(${eased.toFixed(1)}px,0,0)`;
+        screen.style.opacity = String(1 - Math.min(Math.abs(eased) / 520, 0.32));
     }, { passive: true });
     const finish = () => {
         if (mode !== "drag") {
@@ -705,11 +714,12 @@ function initSwipe() {
         }
         mode = "idle";
         const i = order.indexOf(activeTab);
-        const fast = Date.now() - startT < 350 && Math.abs(dx) > 40;
-        const far = Math.abs(dx) > window.innerWidth * 0.22;
+        const fast = Math.abs(velocity) > 0.45 && Math.abs(dx) > 32 && (velocity < 0) === (dx < 0);
+        const far = Math.abs(dx) > window.innerWidth * 0.2;
         const next = dx < 0 ? i + 1 : i - 1;
         if ((far || fast) && next >= 0 && next < order.length) {
             const node = screen;
+            swipeVT = true;
             setTab(order[next]);
             // If the new tab has to load first, slide the old screen back meanwhile.
             window.setTimeout(() => {
@@ -737,6 +747,7 @@ const tabPending = {};
 let paintedTab = null;
 let tabSeq = 0;
 let prefetchTimer = 0;
+let swipeVT = false;
 function tabKey(tab) {
     if (tab === "schedule")
         return "schedule:" + calendarMonth;
@@ -858,13 +869,17 @@ function paintTab(tab, html, kind, dir) {
     if (doc.startViewTransition && !prefersReducedMotion()) {
         const html5 = document.documentElement;
         html5.dataset.vt = dir >= 0 ? "fwd" : "back";
+        if (swipeVT)
+            html5.dataset.vtSpeed = "swipe";
+        swipeVT = false;
+        const clear = () => { delete html5.dataset.vt; delete html5.dataset.vtSpeed; };
         try {
             const t = doc.startViewTransition(() => apply("screen--vt"));
-            t.finished.then(() => { delete html5.dataset.vt; }, () => { delete html5.dataset.vt; });
+            t.finished.then(clear, clear);
             return;
         }
         catch (e) {
-            delete html5.dataset.vt;
+            clear();
         }
     }
     apply(dir >= 0 ? "screen--from-right" : "screen--from-left");
@@ -1130,7 +1145,7 @@ function sideExtras() {
         links.push({ icon: "doc", title: "Методички", action: "library" });
         links.push({ icon: "check", title: "Чек-листы", action: "checklists" });
     }
-    const top = '<div class="side-brand"><span class="side-logo">' + icon("home") + '</span><span class="side-brand-text">Рабочее место<small>Персонал ресторана</small></span></div>';
+    const top = '<div class="side-brand"><span class="side-logo">' + icon("home") + '</span><span class="side-brand-text">Staff Hub<small>Персонал ресторана</small></span></div>';
     const mid = links.length
         ? '<div class="side-sep">Разделы</div>' + links.map((l) => `<button type="button" class="side-link" data-action="${l.action}">${icon(l.icon)}<span>${esc(l.title)}</span></button>`).join("")
         : "";
@@ -1321,7 +1336,7 @@ async function submitStaff() {
     try {
         const result = await api("/staff", {
             method: "POST",
-            body: JSON.stringify({ full_name: fullName, phone, position, password, rate, qr_image: await fileAsDataUrl(qrFile), ...(values.get("branch_id") ? { branch_id: Number(values.get("branch_id")) } : {}) }),
+            body: JSON.stringify({ full_name: fullName, phone, position, password, rate, qr_image: await compressImage(qrFile), ...(values.get("branch_id") ? { branch_id: Number(values.get("branch_id")) } : {}) }),
         });
         if (!result.ok) {
             const message = result.reason === "owner_only"
@@ -1477,13 +1492,86 @@ async function submitAnnouncement() {
         }
     }
 }
+/** Photos of QR codes are downscaled so uploads stay small (max side 900px, JPEG). */
+async function compressImage(file) {
+    const original = await fileAsDataUrl(file);
+    try {
+        const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = () => reject(new Error("img")); i.src = original; });
+        const scale = Math.min(1, 900 / Math.max(img.width, img.height));
+        if (scale >= 1 && file.size < 300 * 1024)
+            return original;
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        if (!ctx)
+            return original;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL("image/jpeg", 0.92);
+    }
+    catch (e) {
+        return original;
+    }
+}
+/** Shows the chosen QR photo right in the form, before saving. */
+function initQrPreview() {
+    document.addEventListener("change", (ev) => {
+        const input = ev.target;
+        if (!input || input.type !== "file" || input.name !== "qr_image" || !input.files || !input.files[0])
+            return;
+        const file = input.files[0];
+        void fileAsDataUrl(file).then((url) => {
+            const box = input.closest(".qr-upload");
+            if (box) {
+                box.classList.add("qr-upload--has");
+                let img = box.querySelector(".qr-preview");
+                if (!img) {
+                    img = document.createElement("img");
+                    img.className = "qr-preview";
+                    img.alt = "Выбранный QR-код";
+                    box.insertBefore(img, box.firstChild);
+                }
+                img.src = url;
+                const title = box.querySelector(".qr-upload-title");
+                if (title)
+                    title.textContent = file.name;
+                return;
+            }
+            const editor = input.closest(".qr-editor");
+            if (editor) {
+                let img = editor.querySelector("img");
+                if (!img) {
+                    editor.querySelector(".qr-editor-empty")?.remove();
+                    img = document.createElement("img");
+                    img.alt = "QR-код сотрудника";
+                    editor.insertBefore(img, editor.firstChild);
+                }
+                img.src = url;
+                img.classList.add("qr-new");
+            }
+        }).catch(() => { });
+    });
+}
 function fileAsDataUrl(file) {
     return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
 }
 function applyTheme(theme) {
-    const resolved = theme === "auto" ? tg.colorScheme : theme;
+    const system = tg.initData ? tg.colorScheme : (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const resolved = theme === "auto" ? system : theme;
     document.body.dataset.theme = theme;
     document.body.classList.toggle("dark", resolved === "dark");
+    const bg = resolved === "dark" ? "#000000" : "#f2f2f7";
+    document.documentElement.style.backgroundColor = bg;
+    document.documentElement.style.colorScheme = resolved === "dark" ? "dark" : "light";
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta)
+        meta.setAttribute("content", bg);
+    try {
+        window.localStorage.setItem("staff_theme", theme);
+    }
+    catch (e) { /* ignore */ }
 }
 async function saveTheme(theme) {
     if (!profile)
@@ -1755,6 +1843,7 @@ function syncFullscreenLayoutLater() {
 }
 function boot() {
     installDialogs();
+    initQrPreview();
     initSwipe();
     try {
         let queued = false;
@@ -1768,7 +1857,16 @@ function boot() {
     catch (e) { /* ignore */ }
     tg.ready();
     tg.expand();
-    applyTheme("auto");
+    {
+        let saved = "auto";
+        try {
+            const t = window.localStorage.getItem("staff_theme");
+            if (t === "light" || t === "dark" || t === "auto")
+                saved = t;
+        }
+        catch (e) { /* ignore */ }
+        applyTheme(saved);
+    }
     try {
         tg.setHeaderColor("secondary_bg_color");
         if (tg.isVersionAtLeast("7.7"))

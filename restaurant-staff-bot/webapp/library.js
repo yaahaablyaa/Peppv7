@@ -6,6 +6,7 @@ let libCategory = "all";
 let libQuery = "";
 let libListenersReady = false;
 let libBusy = false;
+let libEditId = 0;
 const LIB_LABELS = { pdf: "PDF", png: "IMG", jpg: "IMG", jpeg: "IMG", webp: "IMG", docx: "DOC", xlsx: "XLS", pptx: "PPT", txt: "TXT", csv: "CSV" };
 function fmtSize(bytes) {
     if (bytes >= 1048576)
@@ -21,21 +22,25 @@ function libList() {
     if (!files.length)
         return '<div class="section"><div class="empty">Ничего не найдено</div></div>';
     return '<div class="section section--stagger">' + files.map((f, i) => `<div class="lib-row" style="--i:${Math.min(i, 10)}"><button type="button" class="lib-open" data-action="lib-open:${f.id}"><span class="lib-ico lib-ico--${esc(f.ext)}">${esc(LIB_LABELS[f.ext] || "FILE")}</span>` +
-        `<span class="lib-main"><span class="lib-title">${esc(f.title)}</span><span class="lib-meta">${esc(f.category)} · ${fmtSize(f.size)} · ${esc(humanDate(f.created_at.slice(0, 10)))}${d.can_manage ? audienceTag(f.audience) : ""}</span></span></button>` +
-        (d.can_manage ? `<button type="button" class="icon-btn icon-btn--danger" data-action="lib-delete:${f.id}" aria-label="Удалить файл"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4.5h4V7M7 7l1 12.5h8L17 7"/></svg></button>` : "") +
+        `<span class="lib-main"><span class="lib-title">${esc(f.title)}</span><span class="lib-meta">${esc(f.category)} · ${fmtSize(f.size)} · ${esc(humanDate(f.created_at.slice(0, 10)))}${f.can_edit || d.can_manage ? audienceTag(f.audience) : ""}</span></span></button>` +
+        (f.can_edit ? `<button type="button" class="icon-btn" data-action="lib-edit:${f.id}" aria-label="Редактировать файл"><svg viewBox="0 0 24 24"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z"/><path d="m13.5 8.5 3 3"/></svg></button><button type="button" class="icon-btn icon-btn--danger" data-action="lib-delete:${f.id}" aria-label="Удалить файл"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4.5h4V7M7 7l1 12.5h8L17 7"/></svg></button>` : "") +
         "</div>").join("") + "</div>";
 }
 function renderLibrary(d) {
     if (libScreen === "upload") {
-        return '<div class="screen"><button class="back-link" data-action="library-back">‹ Назад</button><div class="screen-title">Новый файл</div>' +
-            `<div class="screen-sub">PDF, фото, Word, Excel, PowerPoint или текст, до ${d.max_mb} МБ.</div>` +
+        const f = libEditId ? d.files.find((x) => x.id === libEditId) : undefined;
+        const cat = f ? f.category : libCategory !== "all" ? libCategory : "Меню";
+        return `<div class="screen"><button class="back-link" data-action="library-back">‹ Назад</button><div class="screen-title">${f ? "Редактирование файла" : "Новый файл"}</div>` +
+            `<div class="screen-sub">${f ? "Измените название, раздел и аудиторию или замените файл." : `PDF, фото, Word, Excel, PowerPoint или текст, до ${d.max_mb} МБ.`}</div>` +
             '<form class="section staff-form staff-form--card" id="lib-form">' +
-            '<label class="field"><span class="field-label">Файл</span><input id="lib-file" name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.docx,.xlsx,.pptx,.txt,.csv" required></label>' +
-            '<label class="field"><span class="field-label">Название</span><input name="title" maxlength="120" placeholder="Например, Меню зала, осень" required></label>' +
-            `<label class="field"><span class="field-label">Раздел</span><select name="category">${d.categories.map((c) => `<option value="${esc(c)}"${c === (libCategory !== "all" ? libCategory : "Меню") ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></label>` +
-            audienceField("lib", d.positions) +
-            '<button class="button staff-submit" type="submit">Загрузить</button></form>' +
-            '<div class="section-footer">Файл увидят только выбранные должности (менеджеры видят всё), им придёт уведомление.</div></div>';
+            (f ? `<div class="field field--hint lib-current">Сейчас: ${esc(f.filename)} · ${fmtSize(f.size)}</div>` : "") +
+            `<label class="field"><span class="field-label">${f ? "Заменить файл (необязательно)" : "Файл"}</span><input id="lib-file" name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.docx,.xlsx,.pptx,.txt,.csv"${f ? "" : " required"}></label>` +
+            `<label class="field"><span class="field-label">Название</span><input name="title" maxlength="120" placeholder="Например, Меню зала, осень" value="${f ? esc(f.title) : ""}" required></label>` +
+            `<label class="field"><span class="field-label">Раздел</span><select name="category">${d.categories.map((c) => `<option value="${esc(c)}"${c === cat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></label>` +
+            audienceField("lib", d.positions, !!d.restricted) +
+            `<button class="button staff-submit" type="submit">${f ? "Сохранить" : "Загрузить"}</button>` +
+            (f ? '<button type="button" class="button button--secondary staff-cancel" data-action="lib-edit-cancel">Отмена</button>' : "") + '</form>' +
+            `<div class="section-footer">${d.restricted ? "Файл увидят выбранные должности вашего отдела." : "Файл увидят только выбранные должности (менеджеры видят всё)."} Сотрудникам придёт уведомление о новом файле.</div></div>`;
     }
     let html = '<div class="screen"><button class="back-link" data-action="library-back">‹ Назад</button><div class="screen-title">Методички</div>' +
         '<div class="screen-sub">Меню, стандарты и инструкции: открывайте файлы прямо из приложения.</div>';
@@ -70,6 +75,7 @@ function libBack() {
     if (!libraryMode || libScreen === "list")
         return false;
     libScreen = "list";
+    libEditId = 0;
     if (libraryData)
         rerender(renderLibrary(libraryData));
     return true;
@@ -117,23 +123,27 @@ async function submitLibrary() {
     const file = input && input.files && input.files[0];
     const v = new FormData(form);
     const title = String(v.get("title") || "").trim();
-    if (!file)
+    if (!file && !libEditId)
         return void tg.showAlert("Выберите файл.");
     if (title.length < 2)
         return void tg.showAlert("Укажите название.");
-    if (file.size > libraryData.max_mb * 1048576)
+    if (file && file.size > libraryData.max_mb * 1048576)
         return void tg.showAlert(`Файл слишком большой. Максимум ${libraryData.max_mb} МБ.`);
     const button = form.querySelector(".staff-submit");
+    const label = libEditId ? "Сохранить" : "Загрузить";
     if (button) {
         button.disabled = true;
-        button.textContent = "Загружаем…";
+        button.textContent = "Сохраняем…";
     }
     try {
-        const data = await readFileAsDataUrl(file);
-        const r = await api("/library/upload", {
-            method: "POST",
-            body: JSON.stringify({ title, category: String(v.get("category") || "Другое"), filename: file.name, data, positions: audienceState.lib || [] }),
-        });
+        const payload = { title, category: String(v.get("category") || "Другое"), positions: audienceState.lib || [] };
+        if (file) {
+            payload.filename = file.name;
+            payload.data = await readFileAsDataUrl(file);
+        }
+        if (libEditId)
+            payload.id = libEditId;
+        const r = await api(libEditId ? "/library/update" : "/library/upload", { method: "POST", body: JSON.stringify(payload) });
         if (!r.ok) {
             tg.showAlert(r.reason === "too_big" ? "Файл слишком большой." : "Этот тип файла не поддерживается или файл повреждён.");
             haptic("error");
@@ -141,16 +151,17 @@ async function submitLibrary() {
         }
         haptic("success");
         audienceState.lib = [];
+        libEditId = 0;
         libScreen = "list";
         void loadLibrary(false);
     }
     catch (e) {
-        tg.showAlert("Не удалось загрузить файл. Проверьте связь.");
+        tg.showAlert("Не удалось сохранить файл. Проверьте связь.");
     }
     finally {
         if (button) {
             button.disabled = false;
-            button.textContent = "Загрузить";
+            button.textContent = label;
         }
     }
 }
@@ -183,6 +194,8 @@ function handleLibraryAction(action) {
         libScreen = "list";
         libCategory = "all";
         libQuery = "";
+        libEditId = 0;
+        audienceState.lib = [];
         haptic("light");
         setOverlayControls(true);
         void loadLibrary();
@@ -204,9 +217,30 @@ function handleLibraryAction(action) {
         return true;
     }
     if (action === "lib-new") {
+        libEditId = 0;
+        audienceState.lib = [];
         libScreen = "upload";
         rerender(renderLibrary(libraryData));
         root().scrollTop = 0;
+        return true;
+    }
+    if (action.indexOf("lib-edit:") === 0) {
+        const f = libraryData.files.find((x) => x.id === Number(action.slice(9)));
+        if (f) {
+            libEditId = f.id;
+            audienceState.lib = f.audience.slice();
+            libScreen = "upload";
+            haptic("light");
+            rerender(renderLibrary(libraryData));
+            root().scrollTop = 0;
+        }
+        return true;
+    }
+    if (action === "lib-edit-cancel") {
+        libEditId = 0;
+        audienceState.lib = [];
+        libScreen = "list";
+        rerender(renderLibrary(libraryData));
         return true;
     }
     if (action.indexOf("lib-open:") === 0) {

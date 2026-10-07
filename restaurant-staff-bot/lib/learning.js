@@ -138,6 +138,28 @@ function registerLearning(bot, sdk, helpers) {
     return { ok: true };
   });
 
+  sdk.miniapp.post("/trainings/update", async (ctx) => {
+    const manager = me(ctx);
+    if (!isManager(manager)) return NO_ACCESS;
+    const b = ctx.body || {};
+    const id = Number(b.id);
+    if (!Number.isInteger(id) || !db.get("SELECT id FROM trainings WHERE id = ?", [id])) return { ok: false, reason: "not_found" };
+    const title = String(b.title || "").trim().replace(/\s+/g, " ");
+    const text = String(b.body || "").trim();
+    const url = String(b.url || "").trim();
+    let validUrl = "";
+    if (url) {
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== "https:") return { ok: false, reason: "bad_url" };
+        validUrl = parsed.toString();
+      } catch (error) { return { ok: false, reason: "bad_url" }; }
+    }
+    if (title.length < 2 || title.length > 120 || text.length < 2 || text.length > 4000 || validUrl.length > 2048) return { ok: false, reason: "bad_training" };
+    db.run("UPDATE trainings SET title = ?, body = ?, url = ?, positions = ? WHERE id = ?", [title, text, validUrl, JSON.stringify(roles.cleanAudience(b.positions)), id]);
+    return { ok: true };
+  });
+
   sdk.miniapp.post("/trainings/complete", async (ctx) => {
     const emp = me(ctx);
     if (!emp) return NO_ACCESS;
@@ -289,6 +311,38 @@ function registerLearning(bot, sdk, helpers) {
     if (run) db.run("UPDATE checklist_runs SET done = ?, log = ?, updated_at = datetime('now') WHERE id = ?", [JSON.stringify(done), JSON.stringify(log), run.id]);
     else db.run("INSERT INTO checklist_runs (checklist_id, employee_id, date, done, log) VALUES (?, ?, ?, ?, ?)", [checklistId, emp.id, date, JSON.stringify(done), JSON.stringify(log)]);
     return { ok: true, done, times: log };
+  });
+
+  /** Edit a checklist; today's and past ticks follow their items (matched by text), not by position. */
+  sdk.miniapp.post("/checklists/update", async (ctx) => {
+    const manager = me(ctx);
+    if (!isManager(manager)) return NO_ACCESS;
+    const b = ctx.body || {};
+    const id = Number(b.id);
+    const current = Number.isInteger(id) ? db.get("SELECT id, items FROM checklists WHERE id = ?", [id]) : null;
+    if (!current) return { ok: false, reason: "not_found" };
+    const title = String(b.title || "").trim().replace(/\s+/g, " ");
+    const items = Array.isArray(b.items) ? b.items.map((item) => String(item || "").trim().replace(/\s+/g, " ")).filter(Boolean).slice(0, 30) : [];
+    const positions = roles.cleanAudience(b.positions);
+    if (title.length < 2 || title.length > 120 || !items.length || items.some((item) => item.length > 240)) return { ok: false, reason: "bad_checklist" };
+    const oldItems = itemsOf(current);
+    const map = new Map();
+    const used = new Set();
+    oldItems.forEach((text, oldIndex) => {
+      const at = items.findIndex((t, i) => t === text && !used.has(i));
+      if (at >= 0) { used.add(at); map.set(oldIndex, at); }
+    });
+    db.transaction(() => {
+      db.run("UPDATE checklists SET title = ?, items = ?, positions = ? WHERE id = ?", [title, JSON.stringify(items), JSON.stringify(positions), id]);
+      db.all("SELECT id, done, log FROM checklist_runs WHERE checklist_id = ?", [id]).forEach((run) => {
+        const done = parseJson(run.done, []).filter(Number.isInteger).map((i) => map.get(i)).filter((i) => i !== undefined).sort((x, y) => x - y);
+        const oldLog = parseJson(run.log, {});
+        const log = {};
+        Object.keys(oldLog).forEach((k) => { const n = map.get(Number(k)); if (n !== undefined) log[n] = oldLog[k]; });
+        db.run("UPDATE checklist_runs SET done = ?, log = ? WHERE id = ?", [JSON.stringify(done), JSON.stringify(log), run.id]);
+      });
+    });
+    return { ok: true };
   });
 
   sdk.miniapp.post("/checklists/delete", async (ctx) => {

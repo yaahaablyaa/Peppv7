@@ -286,7 +286,7 @@ module.exports = function registerApi(bot, sdk) {
       `SELECT employees.*, qr_codes.code AS qr_code
          FROM employees
          LEFT JOIN qr_codes ON qr_codes.employee_id = employees.id
-        ${branches ? "WHERE employees.branch_id IN (" + branches.map(() => "?").join(",") + ")" : ""}
+        WHERE employees.role != 'owner'${branches ? " AND employees.branch_id IN (" + branches.map(() => "?").join(",") + ")" : ""}
          ORDER BY employees.active DESC, employees.role DESC, employees.full_name ASC`,
       branches || []
     );
@@ -311,7 +311,7 @@ module.exports = function registerApi(bot, sdk) {
         WHERE employees.id = ?`,
       [employeeId]
     );
-    if (!employee || !roles.canAccessBranch(manager, employee.branch_id)) return { error: "not_found" };
+    if (!employee || employee.role === "owner" || !roles.canAccessBranch(manager, employee.branch_id)) return { error: "not_found" };
     const member = publicStaffMember(employee);
     if (canViewTeamPayroll(manager)) {
       const period = salary.currentPeriod();
@@ -568,7 +568,7 @@ module.exports = function registerApi(bot, sdk) {
     const start = startDate.toISOString().slice(0, 10);
     const end = endDate.toISOString().slice(0, 10);
 
-    const visible = staff.list(db).filter((e) => (e.id === manager.id || roles.canAccessBranch(manager, e.branch_id)) && (e.id === manager.id || roles.canViewPosition(manager, e.position)));
+    const visible = staff.list(db).filter((e) => e.role !== "owner").filter((e) => (e.id === manager.id || roles.canAccessBranch(manager, e.branch_id)) && (e.id === manager.id || roles.canViewPosition(manager, e.position)));
     const ids = new Set(visible.map((e) => e.id));
     return {
       start,
@@ -716,7 +716,7 @@ module.exports = function registerApi(bot, sdk) {
     const branch = db.get("SELECT id, name, address FROM branches WHERE id = ? AND is_active = 1", [id]);
     if (!branch || !roles.canAccessBranch(emp, branch.id)) return { error: "not_found" };
     const people = db.all(
-      "SELECT id, full_name, position, role, phone, active FROM employees WHERE branch_id = ? AND active = 1 ORDER BY full_name",
+      "SELECT id, full_name, position, role, phone, active FROM employees WHERE branch_id = ? AND active = 1 AND role != 'owner' ORDER BY full_name",
       [branch.id]
     );
     const order = roles.POSITION_GROUPS.map((g) => g.name).concat(["Другое"]);

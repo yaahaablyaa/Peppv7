@@ -3,10 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<title>Рабочее место</title>
+<title>Staff Hub</title>
+<meta name="theme-color" content="#f2f2f7">
 <script>
 (function () {
-  var BUILD = "39";
+  var BUILD = "40";
   function report(kind, message, source, line, column, stack) {
     try {
       navigator.sendBeacon("_client-error", new Blob([JSON.stringify({
@@ -31,6 +32,24 @@
 <link rel="stylesheet" href="desktop.css">
 </head>
 <body>
+<script>
+/* Apply the saved theme before the first paint: no light-to-dark flash. */
+(function () {
+  try {
+    var saved = localStorage.getItem("staff_theme") || "auto";
+    var tgw = window.Telegram && window.Telegram.WebApp;
+    var system = tgw && tgw.initData ? tgw.colorScheme : (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    var dark = saved === "dark" || (saved === "auto" && system === "dark");
+    document.body.dataset.theme = saved;
+    if (dark) document.body.classList.add("dark");
+    var bg = dark ? "#000000" : "#f2f2f7";
+    document.documentElement.style.backgroundColor = bg;
+    document.documentElement.style.colorScheme = dark ? "dark" : "light";
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", bg);
+  } catch (e) {}
+})();
+</script>
 <main class="app scroll-content" id="app"></main>
 <div class="scroll-edge scroll-edge--top" aria-hidden="true"></div>
 <div class="scroll-edge scroll-edge--bottom" aria-hidden="true"></div>

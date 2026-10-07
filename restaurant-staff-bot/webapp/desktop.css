@@ -166,3 +166,9 @@
   .team-palette { max-width: 760px; }
   .team-schedule-screen .chips--scroll { margin-bottom: 12px; }
 }
+
+@media (min-width: 900px) {
+  .sec-tabs { margin: 0 0 18px; padding: 0; flex-wrap: wrap; overflow: visible; }
+  .recs { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .sec-body > .section--stagger:has(> .row-bar) { max-width: 760px; }
+}

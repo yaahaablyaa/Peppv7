@@ -24,7 +24,7 @@ module.exports = function registerStart(bot, sdk) {
     const isMgr = employees.isManager(emp);
     await ctx.reply(
       `👋 <b>${sdk.escapeHtml(emp.full_name)}</b>\n` +
-        `${isMgr ? "Панель менеджера" : "Рабочее место официанта"}\n\n` +
+        `${isMgr ? "Панель менеджера" : "Staff Hub"}\n\n` +
         `Приложение доступно через кнопку «Приложение» в меню чата.`,
       { parse_mode: "HTML", reply_markup: { remove_keyboard: true } }
     );

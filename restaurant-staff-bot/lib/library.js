@@ -30,26 +30,45 @@ function registerLibrary(bot, sdk, helpers) {
   const { db } = sdk;
   const { me, isManager, NO_ACCESS } = helpers;
 
-  const visible = (emp, row) => roles.inAudience(emp, roles.parsePositions(row.positions));
+  /** Managers and the owner upload for everybody; the chef and bar manager only for their department. */
+  const canUpload = (emp) => !!emp && (isManager(emp) || emp.role === "chef" || emp.role === "bar_manager");
+  const deptPositions = (emp) => (isManager(emp) ? roles.ALL_POSITIONS : roles.DEPARTMENT[emp.role] || []);
+  const canEditFile = (emp, row) => isManager(emp) || (canUpload(emp) && row.created_by === emp.id);
+  /** Visible to: managers, the uploader, the audience, and department heads whose people are in the audience. */
+  const visible = (emp, row) => {
+    const audience = roles.parsePositions(row.positions);
+    if (roles.inAudience(emp, audience) || row.created_by === emp.id) return true;
+    const dept = roles.DEPARTMENT[emp.role];
+    return !!dept && audience.some((p) => dept.includes(p));
+  };
+  /** Audience forced into the person's own scope (empty list = everybody only for managers). */
+  const scopeAudience = (emp, list) => {
+    const clean = roles.cleanAudience(list);
+    if (isManager(emp)) return clean;
+    const allowed = deptPositions(emp);
+    const inside = clean.filter((p) => allowed.includes(p));
+    return inside.length ? inside : allowed.slice();
+  };
 
   sdk.miniapp.get("/library", async (ctx) => {
     const emp = me(ctx);
     if (!emp) return NO_ACCESS;
     const rows = db.all(
-      "SELECT id, title, category, filename, mime, size, positions, created_at FROM library_files ORDER BY id DESC LIMIT 300"
+      "SELECT id, title, category, filename, mime, size, positions, created_by, created_at FROM library_files ORDER BY id DESC LIMIT 300"
     ).filter((r) => visible(emp, r));
     return {
-      can_manage: isManager(emp),
+      can_manage: canUpload(emp),
+      restricted: canUpload(emp) && !isManager(emp),
       categories: CATEGORIES,
-      positions: isManager(emp) ? roles.ALL_POSITIONS : [],
+      positions: canUpload(emp) ? deptPositions(emp) : [],
       max_mb: MAX_BYTES / 1024 / 1024,
-      files: rows.map(({ positions, ...r }) => ({ ...r, ext: extOf(r.filename), audience: roles.parsePositions(positions) })),
+      files: rows.map(({ positions, created_by, ...r }) => ({ ...r, ext: extOf(r.filename), audience: roles.parsePositions(positions), can_edit: canEditFile(emp, { created_by }) })),
     };
   });
 
   sdk.miniapp.post("/library/upload", async (ctx) => {
     const emp = me(ctx);
-    if (!isManager(emp)) return NO_ACCESS;
+    if (!canUpload(emp)) return NO_ACCESS;
     const b = ctx.body || {};
     const title = String(b.title || "").trim().replace(/\s+/g, " ");
     const category = CATEGORIES.includes(String(b.category)) ? String(b.category) : "Другое";
@@ -62,7 +81,7 @@ function registerLibrary(bot, sdk, helpers) {
     if (!bytes.length) return { ok: false, reason: "bad_file" };
     if (bytes.length > MAX_BYTES) return { ok: false, reason: "too_big" };
     if (!type.magic(bytes)) return { ok: false, reason: "bad_file" };
-    const audience = roles.cleanAudience(b.positions);
+    const audience = scopeAudience(emp, b.positions);
     db.run(
       "INSERT INTO library_files (title, category, filename, mime, size, data, positions, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       [title, category, filename, type.mime, bytes.length, bytes, JSON.stringify(audience), emp.id]
@@ -82,10 +101,39 @@ function registerLibrary(bot, sdk, helpers) {
 
   sdk.miniapp.post("/library/delete", async (ctx) => {
     const emp = me(ctx);
-    if (!isManager(emp)) return NO_ACCESS;
+    if (!canUpload(emp)) return NO_ACCESS;
     const id = Number((ctx.body || {}).id);
-    if (!Number.isInteger(id) || !db.get("SELECT id FROM library_files WHERE id = ?", [id])) return { ok: false, reason: "not_found" };
+    const row = Number.isInteger(id) ? db.get("SELECT id, created_by FROM library_files WHERE id = ?", [id]) : null;
+    if (!row || !canEditFile(emp, row)) return { ok: false, reason: "not_found" };
     db.run("DELETE FROM library_files WHERE id = ?", [id]);
+    return { ok: true };
+  });
+
+  /** Rename, change section / audience and optionally replace the file itself. */
+  sdk.miniapp.post("/library/update", async (ctx) => {
+    const emp = me(ctx);
+    if (!canUpload(emp)) return NO_ACCESS;
+    const b = ctx.body || {};
+    const id = Number(b.id);
+    const row = Number.isInteger(id) ? db.get("SELECT id, created_by, title, category, filename FROM library_files WHERE id = ?", [id]) : null;
+    if (!row || !canEditFile(emp, row)) return { ok: false, reason: "not_found" };
+    const title = b.title === undefined ? row.title : String(b.title).trim().replace(/\s+/g, " ");
+    const category = CATEGORIES.includes(String(b.category)) ? String(b.category) : row.category;
+    if (title.length < 2 || title.length > 120) return { ok: false, reason: "bad_file" };
+    const audience = scopeAudience(emp, b.positions);
+    if (b.data) {
+      const filename = String(b.filename || "").trim().replace(/[\\/\0]/g, "_").slice(0, 120);
+      const type = TYPES[extOf(filename)];
+      const match = String(b.data).match(/^data:[^;,]*(?:;[^;,]*)*;base64,([A-Za-z0-9+/=\s]+)$/);
+      if (!filename || !type || !match) return { ok: false, reason: "bad_file" };
+      const bytes = Buffer.from(match[1], "base64");
+      if (!bytes.length || !type.magic(bytes)) return { ok: false, reason: "bad_file" };
+      if (bytes.length > MAX_BYTES) return { ok: false, reason: "too_big" };
+      db.run("UPDATE library_files SET title = ?, category = ?, positions = ?, filename = ?, mime = ?, size = ?, data = ? WHERE id = ?",
+        [title, category, JSON.stringify(audience), filename, type.mime, bytes.length, bytes, id]);
+    } else {
+      db.run("UPDATE library_files SET title = ?, category = ?, positions = ? WHERE id = ?", [title, category, JSON.stringify(audience), id]);
+    }
     return { ok: true };
   });
 
