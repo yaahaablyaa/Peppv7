@@ -146,7 +146,8 @@ function createServer({ db, bot, botToken, sessionSecret }) {
     const inline = !!(libraryTypes[ext] && libraryTypes[ext].inline);
     res.setHeader("Content-Type", row.mime);
     res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'");
+    // PDF viewers need to run, so sandbox only the downloads (they are never rendered).
+    res.setHeader("Content-Security-Policy", inline ? "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; object-src 'self'; frame-ancestors 'self'" : "sandbox; default-src 'none'");
     res.setHeader("Cache-Control", "private, max-age=300");
     res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(row.filename)}`);
     res.send(Buffer.from(row.data));

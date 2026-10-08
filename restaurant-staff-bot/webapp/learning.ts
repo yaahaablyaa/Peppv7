@@ -158,7 +158,7 @@ function audienceTag(list: string[] | undefined): string {
 
 /* --------------------------------------------------------------- Обучение */
 
-type TrainingTab = "list" | "progress" | "new";
+type TrainingTab = "list" | "library" | "progress" | "new";
 interface TrainingProgressData {
   trainings: { id: number; title: string; done: number; total: number }[];
   employees: { id: number; name: string; position: string; done: number; total: number; percent: number; items: { training_id: number; title: string; done: boolean; at: string | null }[] }[];
@@ -192,15 +192,15 @@ function trainingCard(t: Training, manager: boolean, index: number): string {
 }
 
 function trainingForm(): string {
-  const t = trainingEditId && trainingsData ? trainingsData.trainings.find((x) => x.id === trainingEditId) : undefined;
-  return '<form class="section staff-form staff-form--card" id="training-form">' +
-    `<div class="staff-form-heading">${t ? "Редактирование материала" : "Новый материал"}</div>` +
-    audienceField("tr", (trainingsData && trainingsData.positions) || []) +
-    `<label class="field"><span class="field-label">Название</span><input name="title" maxlength="120" placeholder="Например, Стандарты сервиса" value="${t ? esc(t.title) : ""}" required></label>` +
-    `<label class="field"><span class="field-label">Описание</span><textarea name="body" maxlength="4000" placeholder="Кратко опишите, что нужно изучить" required>${t ? esc(t.body) : ""}</textarea></label>` +
-    `<label class="field"><span class="field-label">Ссылка на материал</span><input name="url" type="url" inputmode="url" maxlength="2048" placeholder="https://... (необязательно)" value="${t ? esc(t.url) : ""}"></label>` +
-    `<button class="button staff-submit" type="submit">${t ? "Сохранить" : "Добавить материал"}</button>` +
-    (t ? '<button type="button" class="button button--secondary staff-cancel" data-action="tr-edit-cancel">Отмена</button>' : "") + '</form>' +
+  const t2 = trainingEditId && trainingsData ? trainingsData.trainings.find((x) => x.id === trainingEditId) : undefined;
+  return '<form class="form-stack" id="training-form"><div class="section staff-form staff-form--card">' +
+    `<div class="staff-form-heading">${t2 ? "Редактирование материала" : "Новый материал"}</div>` +
+    `<label class="field"><span class="field-label">Название</span><input name="title" maxlength="120" placeholder="Например, Стандарты сервиса" value="${t2 ? esc(t2.title) : ""}" required></label>` +
+    `<label class="field"><span class="field-label">Описание</span><textarea name="body" maxlength="4000" placeholder="Кратко опишите, что нужно изучить" required>${t2 ? esc(t2.body) : ""}</textarea></label>` +
+    `<label class="field"><span class="field-label">Ссылка на материал</span><input name="url" type="url" inputmode="url" maxlength="2048" placeholder="https://... (необязательно)" value="${t2 ? esc(t2.url) : ""}"></label></div>` +
+    audienceBlock("tr", (trainingsData && trainingsData.positions) || [], false) +
+    `<button class="button staff-submit" type="submit">${t2 ? "Сохранить" : "Добавить материал"}</button>` +
+    (t2 ? '<button type="button" class="button button--secondary staff-cancel" data-action="tr-edit-cancel">Отмена</button>' : "") + '</form>' +
     '<div class="section-footer">Материал увидят только выбранные должности (менеджеры видят всё). Они получат уведомление и смогут отмечать его изученным, а вы увидите прогресс каждого.</div>';
 }
 
@@ -232,10 +232,14 @@ function trainingProgressView(p: TrainingProgressData): string {
 
 function renderTrainings(d: TrainingsData): string {
   const manager = d.can_manage;
-  let html = '<div class="screen screen--wide"><button class="back-link" data-action="trainings-back">‹ Назад</button><div class="screen-title">Обучение</div>';
-  html += `<div class="screen-sub">${manager ? "Материалы для команды и прогресс каждого сотрудника." : "Изучайте материалы и отмечайте их — менеджер видит ваш прогресс."}</div>`;
+  if (trainingTab === "library" && libScreen === "upload" && libraryData) return libraryUploadScreen(libraryData);
+  let html = '<div class="screen screen--wide"><button class="back-link" data-action="trainings-back">‹ Назад</button><div class="screen-title">Обучение и Методички</div>';
+  html += `<div class="screen-sub">${manager ? "Материалы, файлы-методички и прогресс каждого сотрудника." : "Изучайте материалы, открывайте методички и отмечайте прогресс."}</div>`;
+  const tabs: { id: string; label: string }[] = [{ id: "list", label: "Материалы" }, { id: "library", label: "Методички" }];
+  if (manager) { tabs.push({ id: "progress", label: "Прогресс" }); tabs.push({ id: "new", label: "Новый" }); }
+  html += segmented("training", tabs, trainingTab, "tr-tab:");
+  if (trainingTab === "library") return html + libraryBody(libraryData) + "</div>";
   if (manager) {
-    html += segmented("training", [{ id: "list", label: "Материалы" }, { id: "progress", label: "Прогресс" }, { id: "new", label: "Новый" }], trainingTab, "tr-tab:");
     if (trainingTab === "new") return html + trainingForm() + "</div>";
     if (trainingTab === "progress") {
       return html + (trainingProgress ? trainingProgressView(trainingProgress) : '<div class="skeleton skeleton--block"></div><div class="skeleton skeleton--block"></div>') + "</div>";
@@ -247,7 +251,7 @@ function renderTrainings(d: TrainingsData): string {
       `<div class="hero-value">${p.done} из ${p.total}</div><div class="hero-sub">${p.total && p.done >= p.total ? "Всё изучено — отлично!" : "материалов изучено"}</div></div></div>`;
   }
   if (!d.trainings.length) return html + '<div class="section"><div class="empty">Материалов пока нет</div></div></div>';
-  html += `<div class="section-title">Материалы</div><div class="tr-list">${d.trainings.map((t, i) => trainingCard(t, manager, i)).join("")}</div>`;
+  html += `<div class="section-title">Материалы</div><div class="tr-list">${d.trainings.map((t2, i) => trainingCard(t2, manager, i)).join("")}</div>`;
   return html + "</div>";
 }
 
@@ -257,6 +261,7 @@ async function loadTrainings(skeletonFirst?: boolean): Promise<void> {
     const d = await api<TrainingsData>("/trainings");
     if (d.error) return void (root().innerHTML = noAccess());
     trainingsData = d;
+    if (trainingTab === "library") void loadLibrary(false);
     if (d.can_manage && trainingTab === "progress") {
       try {
         const p = await api<TrainingProgressData>("/trainings/progress");
@@ -582,7 +587,8 @@ function handleLearningAction(action: string): boolean {
   if (handleAudienceAction(action)) return true;
   if (action.indexOf("tr-tab:") === 0) {
     const tab = action.slice(7) as TrainingTab;
-    if (tab !== "list" && tab !== "progress" && tab !== "new") return true;
+    if (tab !== "list" && tab !== "library" && tab !== "progress" && tab !== "new") return true;
+    if (tab === "library") { libScreen = "list"; void loadLibrary(false); }
     if (tab === "new" && trainingTab !== "new") { trainingEditId = 0; audienceState.tr = []; }
     trainingTab = tab;
     haptic("light");

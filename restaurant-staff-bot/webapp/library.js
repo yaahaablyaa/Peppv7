@@ -26,58 +26,69 @@ function libList() {
         (f.can_edit ? `<button type="button" class="icon-btn" data-action="lib-edit:${f.id}" aria-label="Редактировать файл"><svg viewBox="0 0 24 24"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z"/><path d="m13.5 8.5 3 3"/></svg></button><button type="button" class="icon-btn icon-btn--danger" data-action="lib-delete:${f.id}" aria-label="Удалить файл"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4.5h4V7M7 7l1 12.5h8L17 7"/></svg></button>` : "") +
         "</div>").join("") + "</div>";
 }
-function renderLibrary(d) {
-    if (libScreen === "upload") {
-        const f = libEditId ? d.files.find((x) => x.id === libEditId) : undefined;
-        const cat = f ? f.category : libCategory !== "all" ? libCategory : "Меню";
-        return `<div class="screen"><button class="back-link" data-action="library-back">‹ Назад</button><div class="screen-title">${f ? "Редактирование файла" : "Новый файл"}</div>` +
-            `<div class="screen-sub">${f ? "Измените название, раздел и аудиторию или замените файл." : `PDF, фото, Word, Excel, PowerPoint или текст, до ${d.max_mb} МБ.`}</div>` +
-            '<form class="section staff-form staff-form--card" id="lib-form">' +
-            (f ? `<div class="field field--hint lib-current">Сейчас: ${esc(f.filename)} · ${fmtSize(f.size)}</div>` : "") +
-            `<label class="field"><span class="field-label">${f ? "Заменить файл (необязательно)" : "Файл"}</span><input id="lib-file" name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.docx,.xlsx,.pptx,.txt,.csv"${f ? "" : " required"}></label>` +
-            `<label class="field"><span class="field-label">Название</span><input name="title" maxlength="120" placeholder="Например, Меню зала, осень" value="${f ? esc(f.title) : ""}" required></label>` +
-            `<label class="field"><span class="field-label">Раздел</span><select name="category">${d.categories.map((c) => `<option value="${esc(c)}"${c === cat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></label>` +
-            audienceField("lib", d.positions, !!d.restricted) +
-            `<button class="button staff-submit" type="submit">${f ? "Сохранить" : "Загрузить"}</button>` +
-            (f ? '<button type="button" class="button button--secondary staff-cancel" data-action="lib-edit-cancel">Отмена</button>' : "") + '</form>' +
-            `<div class="section-footer">${d.restricted ? "Файл увидят выбранные должности вашего отдела." : "Файл увидят только выбранные должности (менеджеры видят всё)."} Сотрудникам придёт уведомление о новом файле.</div></div>`;
-    }
-    let html = '<div class="screen"><button class="back-link" data-action="library-back">‹ Назад</button><div class="screen-title">Методички</div>' +
-        '<div class="screen-sub">Меню, стандарты и инструкции: открывайте файлы прямо из приложения.</div>';
-    html += '<div class="chips chips--scroll"><button type="button" class="chip' + (libCategory === "all" ? " chip--on" : "") + '" data-action="lib-cat:all">Все</button>' +
+function audienceBlock(key, positions, lock) {
+    audienceList[key] = positions;
+    audienceLocked[key] = lock;
+    if (!audienceState[key])
+        audienceState[key] = [];
+    if (lock && !audienceState[key].length)
+        audienceState[key] = positions.slice();
+    const sel = audienceState[key];
+    return `<div class="aud-block" data-aud-box="${key}"><div class="section-title">Для кого</div><div class="section aud-card"><div class="chips">` +
+        (lock ? "" : `<button type="button" class="chip${sel.length ? "" : " chip--on"}" data-action="aud:${key}:all">Все</button>`) +
+        positions.map((p, i) => `<button type="button" class="chip${sel.indexOf(p) >= 0 ? " chip--on" : ""}" data-action="aud:${key}:${i}">${esc(p)}</button>`).join("") +
+        `</div><div class="aud-hint" data-aud-hint="${key}">${esc(audienceHint(sel))}</div></div></div>`;
+}
+function libraryUploadScreen(d) {
+    const f = libEditId ? d.files.find((x) => x.id === libEditId) : undefined;
+    const cat = f ? f.category : libCategory !== "all" ? libCategory : "Меню";
+    return `<div class="screen"><button class="back-link" data-action="library-back">‹ Назад</button><div class="screen-title">${f ? "Редактирование файла" : "Новый файл"}</div>` +
+        `<div class="screen-sub">${f ? "Измените название, раздел и аудиторию или замените файл." : `PDF, фото, Word, Excel, PowerPoint или текст, до ${d.max_mb} МБ.`}</div>` +
+        '<form class="form-stack" id="lib-form"><div class="section staff-form staff-form--card">' +
+        (f ? `<div class="field field--hint lib-current">Сейчас: ${esc(f.filename)} · ${fmtSize(f.size)}</div>` : "") +
+        `<label class="field"><span class="field-label">${f ? "Заменить файл (необязательно)" : "Файл"}</span><input id="lib-file" name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.docx,.xlsx,.pptx,.txt,.csv"${f ? "" : " required"}></label>` +
+        `<label class="field"><span class="field-label">Название</span><input name="title" maxlength="120" placeholder="Например, Меню зала, осень" value="${f ? esc(f.title) : ""}" required></label>` +
+        `<label class="field"><span class="field-label">Раздел</span><select name="category">${d.categories.map((c) => `<option value="${esc(c)}"${c === cat ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></label></div>` +
+        audienceBlock("lib", d.positions, !!d.restricted) +
+        `<button class="button staff-submit" type="submit">${f ? "Сохранить" : "Загрузить"}</button>` +
+        (f ? '<button type="button" class="button button--secondary staff-cancel" data-action="lib-edit-cancel">Отмена</button>' : "") + '</form>' +
+        `<div class="section-footer">${d.restricted ? "Файл увидят выбранные должности вашего отдела." : "Файл увидят только выбранные должности (менеджеры видят всё)."} Сотрудникам придёт уведомление о новом файле.</div></div>`;
+}
+/** The "Методички" tab inside "Обучение и Методички". */
+function libraryBody(d) {
+    if (!d)
+        return '<div class="skeleton skeleton--block"></div><div class="skeleton skeleton--block"></div>';
+    let html = '<div class="chips chips--scroll"><button type="button" class="chip' + (libCategory === "all" ? " chip--on" : "") + '" data-action="lib-cat:all">Все</button>' +
         d.categories.map((c, i) => `<button type="button" class="chip${libCategory === c ? " chip--on" : ""}" data-action="lib-cat:${i}">${esc(c)}</button>`).join("") + "</div>";
     html += `<div class="searchbox">${icon("search")}<input id="lib-search" type="search" placeholder="Найти файл" value="${esc(libQuery)}" autocomplete="off"></div>`;
     if (d.can_manage)
         html += '<button type="button" class="button inv-add" data-action="lib-new">+ Загрузить файл</button>';
     html += '<div id="lib-list">' + libList() + "</div>";
-    return html + "</div>";
+    return html;
+}
+function libRepaint() {
+    if (trainingsMode && trainingsData)
+        rerender(renderTrainings(trainingsData));
 }
 async function loadLibrary(skeletonFirst) {
-    if (skeletonFirst !== false)
-        root().innerHTML = skeleton(3);
+    void skeletonFirst;
     try {
         const d = await api("/library");
         if (d.error)
-            return void (root().innerHTML = noAccess());
-        libraryData = d;
-        if (!libraryMode)
             return;
-        if (skeletonFirst === false)
-            rerender(renderLibrary(d));
-        else
-            root().innerHTML = renderLibrary(d);
+        libraryData = d;
+        libRepaint();
     }
     catch (e) {
-        root().innerHTML = errorState("Не удалось загрузить методички. Проверьте связь.");
+        tg.showAlert("Не удалось загрузить методички. Проверьте связь.");
     }
 }
 function libBack() {
-    if (!libraryMode || libScreen === "list")
+    if (!trainingsMode || trainingTab !== "library" || libScreen === "list")
         return false;
     libScreen = "list";
     libEditId = 0;
-    if (libraryData)
-        rerender(renderLibrary(libraryData));
+    libRepaint();
     return true;
 }
 function readFileAsDataUrl(file) {
@@ -88,27 +99,43 @@ function readFileAsDataUrl(file) {
         r.readAsDataURL(file);
     });
 }
+/** In-app viewer: works in a browser, in a home-screen web app and falls back to Telegram's link opener. */
+function showViewer(title, url, ext) {
+    const old = document.querySelector(".viewer");
+    if (old)
+        old.remove();
+    const box = document.createElement("div");
+    box.className = "viewer";
+    const isImg = ["png", "jpg", "jpeg", "webp"].indexOf(ext) >= 0;
+    const isPdf = ext === "pdf";
+    box.innerHTML = `<div class="viewer-bar"><button type="button" class="viewer-close" aria-label="Закрыть">‹ Закрыть</button><span class="viewer-title">${esc(title)}</span>` +
+        `<a class="viewer-btn" href="${esc(url)}" target="_blank" rel="noopener">Открыть</a><a class="viewer-btn viewer-btn--main" href="${esc(url)}" download>Скачать</a></div>` +
+        `<div class="viewer-body">${isImg ? `<img src="${esc(url)}" alt="${esc(title)}">` : isPdf ? `<iframe src="${esc(url)}" title="${esc(title)}"></iframe>` : `<div class="viewer-note"><b>${esc(title)}</b><span>Этот тип файла открывается в другом приложении. Нажмите «Скачать».</span></div>`}</div>`;
+    document.body.appendChild(box);
+    const close = () => { box.classList.add("viewer--out"); window.setTimeout(() => box.remove(), 200); document.removeEventListener("keydown", onKey); };
+    const onKey = (e) => { if (e.key === "Escape")
+        close(); };
+    document.addEventListener("keydown", onKey);
+    const btn = box.querySelector(".viewer-close");
+    if (btn)
+        btn.onclick = close;
+}
 async function openLibFile(id) {
     if (libBusy)
         return;
     libBusy = true;
-    // Browsers block pop-ups opened after an await, so open the tab right away.
-    const popup = tg.initData ? null : window.open("", "_blank");
     try {
         const r = await api("/library/link?id=" + id);
         if (!r.url)
             throw new Error("no_link");
         const abs = window.location.origin + r.url;
+        const f = libraryData ? libraryData.files.find((x) => x.id === id) : undefined;
         if (tg.initData)
             tg.openLink(abs);
-        else if (popup)
-            popup.location.href = abs;
         else
-            window.location.href = abs;
+            showViewer(f ? f.title : "Файл", r.url, f ? f.ext : "");
     }
     catch (e) {
-        if (popup)
-            popup.close();
         tg.showAlert("Не удалось открыть файл. Проверьте связь.");
     }
     finally {
@@ -117,7 +144,7 @@ async function openLibFile(id) {
 }
 async function submitLibrary() {
     const form = root().querySelector("#lib-form");
-    if (!form || !libraryMode || !libraryData)
+    if (!form || !trainingsMode || !libraryData)
         return;
     const input = form.querySelector("#lib-file");
     const file = input && input.files && input.files[0];
@@ -171,7 +198,7 @@ function ensureLibListeners() {
     libListenersReady = true;
     root().addEventListener("input", (ev) => {
         const t = ev.target;
-        if (!libraryMode || t.id !== "lib-search" || !libraryData)
+        if (!trainingsMode || trainingTab !== "library" || t.id !== "lib-search" || !libraryData)
             return;
         libQuery = t.value;
         const list = root().querySelector("#lib-list");
@@ -180,7 +207,7 @@ function ensureLibListeners() {
     });
     root().addEventListener("change", (ev) => {
         const t = ev.target;
-        if (!libraryMode || t.id !== "lib-file" || !t.files || !t.files[0])
+        if (!trainingsMode || t.id !== "lib-file" || !t.files || !t.files[0])
             return;
         const title = root().querySelector('#lib-form input[name="title"]');
         if (title && !title.value)
@@ -189,16 +216,9 @@ function ensureLibListeners() {
 }
 function handleLibraryAction(action) {
     if (action === "library") {
-        ensureLibListeners();
-        libraryMode = true;
+        trainingTab = "library";
         libScreen = "list";
-        libCategory = "all";
-        libQuery = "";
-        libEditId = 0;
-        audienceState.lib = [];
-        haptic("light");
-        setOverlayControls(true);
-        void loadLibrary();
+        openTrainings();
         return true;
     }
     if (action.indexOf("lib") !== 0)
@@ -208,19 +228,19 @@ function handleLibraryAction(action) {
             closeOverlay();
         return true;
     }
-    if (!libraryMode || !libraryData)
+    if (!trainingsMode || !libraryData)
         return false;
     if (action.indexOf("lib-cat:") === 0) {
         const k = action.slice(8);
         libCategory = k === "all" ? "all" : libraryData.categories[Number(k)] || "all";
-        rerender(renderLibrary(libraryData));
+        libRepaint();
         return true;
     }
     if (action === "lib-new") {
         libEditId = 0;
         audienceState.lib = [];
         libScreen = "upload";
-        rerender(renderLibrary(libraryData));
+        libRepaint();
         root().scrollTop = 0;
         return true;
     }
@@ -231,7 +251,7 @@ function handleLibraryAction(action) {
             audienceState.lib = f.audience.slice();
             libScreen = "upload";
             haptic("light");
-            rerender(renderLibrary(libraryData));
+            libRepaint();
             root().scrollTop = 0;
         }
         return true;
@@ -240,7 +260,7 @@ function handleLibraryAction(action) {
         libEditId = 0;
         audienceState.lib = [];
         libScreen = "list";
-        rerender(renderLibrary(libraryData));
+        libRepaint();
         return true;
     }
     if (action.indexOf("lib-open:") === 0) {

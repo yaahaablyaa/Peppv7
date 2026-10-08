@@ -116,18 +116,7 @@ function renderAnalytics(d) {
     }
     const issues = d.sections.recommendations.filter((r) => r.level === "bad" || r.level === "warn").length;
     html += '<div class="sec-tabs" role="tablist">' + SECTION_TABS.map((tab) => `<button type="button" role="tab" class="sec-tab${analyticsSection === tab.id ? " sec-tab--on" : ""}" data-action="an-sec:${tab.id}">${tab.label}${tab.id === "recs" && issues ? `<b class="sec-badge">${issues}</b>` : ""}</button>`).join("") + "</div>";
-    html += '<div class="sec-body">';
-    if (analyticsSection === "summary")
-        html += analyticsSummary(d);
-    else if (analyticsSection === "payroll")
-        html += sectionPayroll(d);
-    else if (analyticsSection === "load")
-        html += sectionLoad(d);
-    else if (analyticsSection === "discipline")
-        html += sectionDiscipline(d);
-    else
-        html += sectionRecs(d);
-    html += "</div>";
+    html += '<div class="sec-body">' + analyticsBody(d) + "</div>";
     return html + "</div>";
 }
 function statBox(value, label, bad, count) {
@@ -148,8 +137,10 @@ function sectionPayroll(d) {
     if (!p.visible) {
         html += '<div class="section note-card"><div class="note-title">Суммы скрыты</div><div class="note-text">Зарплатные суммы видят только владелец и финансовый директор. Ниже показаны часы.</div></div>';
         html += '<div class="stat-grid">' + statBox(hoursText(p.hours), "Отработано") + statBox(hoursText(p.planned_hours), "Запланировано") + "</div>";
-        if (p.by_position.length)
-            html += '<div class="section-title">Часы по должностям</div>' + barRows(p.by_position.map((x) => ({ title: `${x.position} · ${x.staff}`, value: hoursText(x.hours), percent: pct(x.hours, Math.max(1, ...p.by_position.map((y) => y.hours))) })));
+        if (p.by_position.length) {
+            const rows = p.by_position.filter((x) => x.hours > 0).map((x) => ({ label: x.position, value: x.hours, text: esc(hoursText(x.hours)), sub: `${x.staff} чел.` }));
+            html += '<div class="section-title">Часы по должностям</div>' + donut(rows, esc(hoursText(p.hours)), "всего за период");
+        }
         return html;
     }
     const total = p.total || 0;
@@ -166,8 +157,9 @@ function sectionPayroll(d) {
         html += '<div class="section-title">По филиалам</div>' + barRows(p.by_branch.map((b) => ({ title: b.name, sub: `${b.staff} чел. · ${hoursText(b.hours)}`, value: esc(money(b.cost || 0)), percent: pct(b.cost || 0, max) })));
     }
     if (p.by_position.length) {
-        const max = Math.max(1, ...p.by_position.map((x) => x.cost || 0));
-        html += '<div class="section-title">По должностям</div>' + barRows(p.by_position.slice().sort((a, b) => (b.cost || 0) - (a.cost || 0)).map((x) => ({ title: `${x.position} · ${x.staff}`, sub: hoursText(x.hours), value: esc(money(x.cost || 0)), percent: pct(x.cost || 0, max) })));
+        const rows = p.by_position.slice().sort((a, b) => (b.cost || 0) - (a.cost || 0)).filter((x) => (x.cost || 0) > 0)
+            .map((x) => ({ label: x.position, value: x.cost || 0, text: esc(money(x.cost || 0)), sub: `${x.staff} ${plural(x.staff, "чел.", "чел.", "чел.")} · ${hoursText(x.hours)}` }));
+        html += '<div class="section-title">Затраты по должностям</div>' + donut(rows, esc(moneyShort(total)), "всего за период");
     }
     if (p.top && p.top.length) {
         const max = Math.max(1, ...p.top.map((x) => x.cost));
@@ -227,14 +219,138 @@ function sectionRecs(d) {
         '</div><div class="section-footer">Рекомендации составляются автоматически по графику, отметкам прихода и ФОТ за выбранный период.</div>';
 }
 function money_(v) { return money(v); }
+/* ---------------------------------------------------------------- data */
+const analyticsCache = {};
+const analyticsPending = {};
+let analyticsSeq = 0;
+let analyticsWarm = 0;
+function anKey(view, month, branch) {
+    return `${view}|${month}|${branch}`;
+}
+function fetchAnalytics(view, month, branch) {
+    const key = anKey(view, month, branch);
+    if (analyticsCache[key])
+        return Promise.resolve(analyticsCache[key]);
+    if (analyticsPending[key])
+        return analyticsPending[key];
+    const p = api(`/analytics/overview?view=${view}&month=${month}&branch=${branch}`).then((d) => {
+        delete analyticsPending[key];
+        if (d.error)
+            return null;
+        analyticsCache[key] = d;
+        return d;
+    }).catch(() => { delete analyticsPending[key]; return null; });
+    analyticsPending[key] = p;
+    return p;
+}
+function clearAnalyticsCache() {
+    Object.keys(analyticsCache).forEach((k) => delete analyticsCache[k]);
+}
+/** Warms the neighbours (other periods, previous/next month) so the next tap is instant. */
+function warmAnalytics() {
+    window.clearTimeout(analyticsWarm);
+    analyticsWarm = window.setTimeout(async () => {
+        const views = ["p1", "p2", "full"];
+        const today = uzbekistanToday().slice(0, 7);
+        const jobs = [];
+        views.filter((v) => v !== analyticsView).forEach((v) => jobs.push([v, analyticsMonth]));
+        const prev = shiftMonthString(analyticsMonth, -1);
+        jobs.push([analyticsView, prev]);
+        if (shiftMonthString(analyticsMonth, 1) <= today)
+            jobs.push([analyticsView, shiftMonthString(analyticsMonth, 1)]);
+        for (const [v, m] of jobs) {
+            if (activeTab !== "analytics")
+                return;
+            await fetchAnalytics(v, m, analyticsBranch);
+        }
+    }, 500);
+}
+/* ------------------------------------------------------------ partial UI */
+const VIEW_ORDER = ["p1", "p2", "full"];
+function analyticsBody(d) {
+    if (analyticsSection === "summary")
+        return analyticsSummary(d);
+    if (analyticsSection === "payroll")
+        return sectionPayroll(d);
+    if (analyticsSection === "load")
+        return sectionLoad(d);
+    if (analyticsSection === "discipline")
+        return sectionDiscipline(d);
+    return sectionRecs(d);
+}
+/** Updates the toolbar instantly (before any data arrives): month, period thumb, branch chips, section tabs. */
+function syncAnalyticsChrome() {
+    const month = root().querySelector(".toolbar .month-name");
+    if (month)
+        month.textContent = monthTitle(analyticsMonth);
+    const next = root().querySelector('.toolbar [data-action="an-month:1"]');
+    if (next)
+        next.disabled = analyticsMonth >= uzbekistanToday().slice(0, 7);
+    const seg = root().querySelector(".toolbar .seg");
+    if (seg) {
+        seg.style.setProperty("--i", String(VIEW_ORDER.indexOf(analyticsView)));
+        seg.querySelectorAll(".seg-btn").forEach((b, i) => b.classList.toggle("seg-btn--on", i === VIEW_ORDER.indexOf(analyticsView)));
+    }
+    root().querySelectorAll('[data-action^="an-branch:"]').forEach((c) => c.classList.toggle("chip--on", c.dataset.action === "an-branch:" + analyticsBranch));
+    const sections = SECTION_TABS.map((t) => t.id);
+    root().querySelectorAll(".sec-tab").forEach((t, i) => t.classList.toggle("sec-tab--on", sections[i] === analyticsSection));
+}
+function swapAnalyticsBody(d, dir) {
+    const body = root().querySelector(".sec-body");
+    if (!body) {
+        rerender(renderAnalytics(d));
+        return;
+    }
+    body.innerHTML = analyticsBody(d);
+    body.classList.remove("sec-enter--fwd", "sec-enter--back", "sec-enter--fade");
+    void body.offsetWidth;
+    body.classList.add(dir > 0 ? "sec-enter--fwd" : dir < 0 ? "sec-enter--back" : "sec-enter--fade");
+    const issues = d.sections.recommendations.filter((r) => r.level === "bad" || r.level === "warn").length;
+    const recs = root().querySelector('.sec-tab[data-action="an-sec:recs"]');
+    if (recs)
+        recs.innerHTML = `Рекомендации${issues ? `<b class="sec-badge">${issues}</b>` : ""}`;
+    afterRender();
+}
+/** Tap on a period, month or branch: chrome reacts at once, the body follows as soon as data is there. */
+async function analyticsGo(dir) {
+    if (activeTab !== "analytics")
+        return;
+    const seq = ++analyticsSeq;
+    syncAnalyticsChrome();
+    const key = anKey(analyticsView, analyticsMonth, analyticsBranch);
+    const cached = analyticsCache[key];
+    if (cached) {
+        analyticsData = cached;
+        root().classList.remove("busy");
+        swapAnalyticsBody(cached, dir);
+        warmAnalytics();
+        return;
+    }
+    root().classList.add("busy");
+    const d = await fetchAnalytics(analyticsView, analyticsMonth, analyticsBranch);
+    if (seq !== analyticsSeq || activeTab !== "analytics")
+        return;
+    root().classList.remove("busy");
+    if (!d) {
+        analyticsBranch = "all";
+        tg.showAlert("Не удалось загрузить данные. Проверьте связь.");
+        return;
+    }
+    analyticsData = d;
+    swapAnalyticsBody(d, dir);
+    warmAnalytics();
+}
 function handleAnalyticsAction(action) {
     if (action.indexOf("an-view:") === 0) {
         const v = action.slice(8);
         if (v !== "p1" && v !== "p2" && v !== "full")
             return true;
+        if (v === analyticsView)
+            return true;
+        const dir = VIEW_ORDER.indexOf(v) - VIEW_ORDER.indexOf(analyticsView);
         analyticsView = v;
         haptic("light");
-        void loadAnalyticsKeep();
+        void analyticsGo(dir);
         return true;
     }
     if (action.indexOf("an-month:") === 0) {
@@ -246,54 +362,96 @@ function handleAnalyticsAction(action) {
             return true;
         analyticsMonth = next;
         haptic("light");
-        void loadAnalyticsKeep();
+        void analyticsGo(dir);
         return true;
     }
     if (action.indexOf("an-branch:") === 0) {
-        analyticsBranch = action.slice(10);
+        const b = action.slice(10);
+        if (b === analyticsBranch)
+            return true;
+        analyticsBranch = b;
         haptic("light");
-        void loadAnalyticsKeep();
+        void analyticsGo(0);
         return true;
     }
     if (action.indexOf("an-sec:") === 0) {
         const id = action.slice(7);
-        if (!SECTION_TABS.some((t) => t.id === id))
+        if (!SECTION_TABS.some((t) => t.id === id) || id === analyticsSection)
             return true;
+        const ids = SECTION_TABS.map((t) => t.id);
+        const dir = ids.indexOf(id) - ids.indexOf(analyticsSection);
         analyticsSection = id;
         haptic("light");
+        syncAnalyticsChrome();
         if (analyticsData)
-            rerender(renderAnalytics(analyticsData));
+            swapAnalyticsBody(analyticsData, dir);
+        const tabs = root().querySelector(".sec-tabs");
         const tab = root().querySelector(".sec-tab--on");
-        if (tab && tab.scrollIntoView)
-            tab.scrollIntoView({ block: "nearest", inline: "center" });
+        if (tabs && tab)
+            tabs.scrollTo({ left: Math.max(0, tab.offsetLeft - (tabs.clientWidth - tab.offsetWidth) / 2), behavior: "smooth" });
+        return true;
+    }
+    if (action.indexOf("an-seg:") === 0) {
+        donutSelect(Number(action.slice(7)));
         return true;
     }
     if (action.indexOf("an-sort:") === 0) {
-        const s = action.slice(8);
-        if (s !== "hours" && s !== "late" && s !== "missing")
+        const s2 = action.slice(8);
+        if (s2 !== "hours" && s2 !== "late" && s2 !== "missing")
             return true;
-        analyticsSort = s;
+        analyticsSort = s2;
         haptic("light");
         if (analyticsData)
-            rerender(renderAnalytics(analyticsData));
+            swapAnalyticsBody(analyticsData, 0);
         return true;
     }
     return false;
 }
-async function loadAnalyticsKeep() {
-    try {
-        const d = await api(`/analytics/overview?view=${analyticsView}&month=${analyticsMonth}&branch=${analyticsBranch}`);
-        if (activeTab !== "analytics")
-            return;
-        if (d.error) {
-            analyticsBranch = "all";
-            return;
+/* ---------------------------------------------------------------- donut */
+const DONUT_COLORS = ["#ff453a", "#0a84ff", "#30d158", "#ff9f0a", "#bf5af2", "#64d2ff", "#ffd60a", "#ff6482", "#5e5ce6", "#ac8e68"];
+let donutRows = [];
+let donutTotalText = "";
+let donutCaption = "";
+function donut(rows, totalText, caption) {
+    const total = rows.reduce((s2, r) => s2 + r.value, 0);
+    if (!total)
+        return '<div class="section"><div class="empty">Нет данных для диаграммы</div></div>';
+    donutRows = rows;
+    donutTotalText = totalText;
+    donutCaption = caption;
+    const R = 74;
+    const C = 2 * Math.PI * R;
+    let offset = 0;
+    const segs = rows.map((r, i) => {
+        const len = Math.max(0, r.value / total * C - (rows.length > 1 ? 3 : 0));
+        const circle = `<circle class="dn-seg" data-seg="${i}" cx="100" cy="100" r="${R}" fill="none" stroke="${DONUT_COLORS[i % DONUT_COLORS.length]}" stroke-width="26" ` +
+            `style="--C:${C.toFixed(2)};--len:${len.toFixed(2)};--off:${(-offset).toFixed(2)};--k:${i}" />`;
+        offset += r.value / total * C;
+        return circle;
+    }).join("");
+    const legend = rows.map((r, i) => `<button type="button" class="dn-row" data-seg-row="${i}" data-action="an-seg:${i}" style="--i:${Math.min(i, 8)}"><i style="background:${DONUT_COLORS[i % DONUT_COLORS.length]}"></i>` +
+        `<span class="dn-name">${esc(r.label)}${r.sub ? `<small>${esc(r.sub)}</small>` : ""}</span><span class="dn-val">${r.text}<small>${Math.round(r.value / total * 100)}%</small></span></button>`).join("");
+    return `<div class="section donut-card"><div class="donut"><svg viewBox="0 0 200 200" aria-hidden="true"><g transform="rotate(-90 100 100)">${segs}</g></svg>` +
+        `<div class="donut-center"><b id="dn-main">${totalText}</b><span id="dn-sub">${esc(caption)}</span></div></div><div class="dn-legend">${legend}</div></div>`;
+}
+let donutActive = -1;
+function donutSelect(i) {
+    const segs = root().querySelectorAll(".dn-seg");
+    const rows = root().querySelectorAll(".dn-row");
+    donutActive = donutActive === i ? -1 : i;
+    segs.forEach((c, n) => { c.classList.toggle("dn-seg--on", n === donutActive); c.classList.toggle("dn-seg--dim", donutActive >= 0 && n !== donutActive); });
+    rows.forEach((r, n) => r.classList.toggle("dn-row--on", n === donutActive));
+    const main = document.getElementById("dn-main");
+    const sub = document.getElementById("dn-sub");
+    if (main && sub) {
+        if (donutActive >= 0 && donutRows[donutActive]) {
+            main.innerHTML = donutRows[donutActive].text;
+            sub.textContent = donutRows[donutActive].label;
         }
-        analyticsData = d;
-        tabCache[tabKey("analytics")] = renderAnalytics(d);
-        rerender(renderAnalytics(d));
+        else {
+            main.innerHTML = donutTotalText;
+            sub.textContent = donutCaption;
+        }
     }
-    catch (e) {
-        tg.showAlert("Не удалось загрузить данные. Проверьте связь.");
-    }
+    haptic("light");
 }

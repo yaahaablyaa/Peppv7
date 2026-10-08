@@ -24,7 +24,6 @@ let selectedTeamCell = null;
 let loginMode = false;
 let branchesMode = false;
 let inventoryMode = false;
-let libraryMode = false;
 let salaryMonth = uzbekistanToday().slice(0, 7);
 let salaryView = "";
 function root() {
@@ -93,7 +92,7 @@ function renderHome(d) {
     }
     html += '<div class="section-title">Быстрые действия</div><div class="section">';
     html += cell({ icon: "qr", title: "Приход и уход", subtitle: "Отметить смену", tappable: true, action: "tab:attendance" });
-    html += cell({ icon: "book", title: "Обучение", value: String(d.counts.trainings), tappable: true, action: "trainings" });
+    html += cell({ icon: "book", title: "Обучение и методички", value: String(d.counts.trainings), tappable: true, action: "trainings" });
     html += cell({ icon: "check", title: "Чек-листы", value: String(d.counts.checklists), tappable: true, action: "checklists" });
     if (canAnalytics(d.employee))
         html += cell({ icon: "analytics", title: "Аналитика", subtitle: "Периоды и показатели команды", tappable: true, action: "tab:analytics" });
@@ -274,8 +273,6 @@ function renderMore(e) {
         html += cell({ icon: "user", title: "Добавить сотрудника", subtitle: "Создать новый профиль", tappable: true, action: "staff" });
         html += cell({ icon: "calendar", title: "График для команды", subtitle: "Смены всех сотрудников, включая тех персонал", tappable: true, action: "team-schedule" });
         html += cell({ icon: "analytics", title: "Аналитика", subtitle: "Периоды 1–15, 16–конец и весь месяц", tappable: true, action: "tab:analytics" });
-        html += cell({ icon: "book", title: "Прогресс обучения", subtitle: "Кто что изучил", tappable: true, action: "learn-report:trainings" });
-        html += cell({ icon: "check", title: "Отчёт по чек-листам", subtitle: "Кто и что выполнил", tappable: true, action: "learn-report:checklists" });
         html += cell({ icon: "box", title: "Инвентаризация", subtitle: "Остатки, приход, списание, пересчёт", tappable: true, action: "inventory" });
         if (e.perms && e.perms.branches)
             html += cell({ icon: "branch", title: "Филиалы", subtitle: "Список и добавление филиалов", tappable: true, action: "branches" });
@@ -294,8 +291,7 @@ function renderMore(e) {
     }
     html += '</div><div class="col"><div class="section-title">Работа</div><div class="section">';
     html += cell({ icon: "news", title: "Объявления", subtitle: "Новости для команды", tappable: true, action: "announcements" });
-    html += cell({ icon: "book", title: "Обучение", subtitle: "Материалы и мой прогресс", tappable: true, action: "trainings" });
-    html += cell({ icon: "doc", title: "Методички", subtitle: "Меню, стандарты, инструкции", tappable: true, action: "library" });
+    html += cell({ icon: "book", title: "Обучение и Методички", subtitle: "Материалы, файлы и мой прогресс", tappable: true, action: "trainings" });
     html += cell({ icon: "check", title: "Чек-листы", tappable: true, action: "checklists" });
     html += cell({ icon: "doc", title: "Заявления", subtitle: "Отправить запрос менеджеру", tappable: true, action: "applications" });
     html += "</div>";
@@ -313,11 +309,11 @@ function renderAnnouncements(d) {
     let html = '<div class="screen"><button class="back-link" data-action="announcements-back">‹ Назад</button><div class="screen-title">Объявления</div>';
     html += '<div class="screen-sub">Новости и важная информация для команды.</div>';
     if (d.can_publish) {
-        html += '<form class="section staff-form staff-form--card" id="announcement-form">';
+        html += '<form class="form-stack" id="announcement-form"><div class="section staff-form staff-form--card">';
         html += '<div class="staff-form-heading">Новое объявление</div>';
         html += '<label class="field"><span class="field-label">Заголовок</span><input name="title" maxlength="120" placeholder="Например, Изменение графика" required></label>';
-        html += '<label class="field"><span class="field-label">Текст</span><textarea name="body" maxlength="2000" placeholder="Напишите объявление для команды" required></textarea></label>';
-        html += audienceField("ann", d.positions || []);
+        html += '<label class="field"><span class="field-label">Текст</span><textarea name="body" maxlength="2000" placeholder="Напишите объявление для команды" required></textarea></label></div>';
+        html += audienceBlock("ann", d.positions || [], false);
         html += '<button class="button staff-submit" type="submit">Опубликовать</button></form>';
     }
     html += '<div class="section-title">Все объявления</div><div class="section">';
@@ -570,7 +566,7 @@ function exportTeamSchedule() {
 }
 /* --------------------------------------------------------------- Роутер */
 function setOverlayControls(_visible) {
-    const isSubscreen = !loginMode && (activeTab === "analytics" || staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode || libraryMode);
+    const isSubscreen = !loginMode && (activeTab === "analytics" || staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode);
     document.body.classList.remove("has-main-button");
     document.body.classList.remove("has-native-back");
     try {
@@ -603,12 +599,70 @@ async function loadStaff() {
         catch (e) { /* ignore */ }
     }
 }
+let navBusy = false;
+/** Runs a navigation inside a View Transition: the screen slides forward/back like a native app. */
+function navigateWithTransition(dir, action) {
+    const doc = document;
+    if (!doc.startViewTransition || prefersReducedMotion() || navBusy || loginMode) {
+        action();
+        return;
+    }
+    navBusy = true;
+    const html5 = document.documentElement;
+    html5.dataset.vt = dir >= 0 ? "fwd" : "back";
+    const finish = () => { delete html5.dataset.vt; navBusy = false; };
+    try {
+        const t = doc.startViewTransition(() => new Promise((resolve) => {
+            const el = root();
+            let timer = 0;
+            let done = false;
+            const end = () => { if (done)
+                return; done = true; mo.disconnect(); resolve(); };
+            const settle = () => {
+                window.clearTimeout(timer);
+                timer = window.setTimeout(() => {
+                    if (el.querySelector(".tab-loading, .skeleton"))
+                        timer = window.setTimeout(end, 800);
+                    else
+                        end();
+                }, 70);
+            };
+            const mo = new MutationObserver(settle);
+            mo.observe(el, { childList: true });
+            action();
+            timer = window.setTimeout(end, 300);
+        }));
+        t.finished.then(finish, finish);
+    }
+    catch (e) {
+        finish();
+        action();
+    }
+}
+/** +1 forward into a sub-screen, -1 back, 0 for everything else. */
+function navDirection(action) {
+    if (action === "analytics-back" || action.indexOf("tab:") === 0)
+        return 0;
+    if (/(^|-)back$/.test(action)) {
+        if (teamScheduleMode && teamHasDraft())
+            return 0;
+        return -1;
+    }
+    const forward = ["inventory", "branches", "trainings", "checklists", "announcements", "team-schedule", "team", "staff", "applications", "library"];
+    if (forward.indexOf(action) >= 0)
+        return 1;
+    const prefixes = ["team-edit:", "branch-open:", "inv-item:", "inv-open:", "inv-report:", "inv-new", "learn-report:"];
+    return prefixes.some((p) => action.indexOf(p) === 0) ? 1 : 0;
+}
 /* ---- swipe between tabs (touch screens): the screen follows the finger, release commits ---- */
+function overlayActive() {
+    return staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode || activeTab === "analytics";
+}
 function swipeAllowed() {
-    if (loginMode || document.querySelector(".dlg-back"))
+    if (loginMode || document.querySelector(".dlg-back, .viewer"))
         return false;
-    if (staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode || libraryMode)
-        return false;
+    if (overlayActive())
+        return true;
     return TABS.some((t) => t.id === activeTab);
 }
 /** True when the touch started inside something that scrolls sideways or takes input. */
@@ -632,21 +686,23 @@ function initSwipe() {
     const order = TABS.map((t) => t.id);
     let startX = 0, startY = 0, startT = 0, dx = 0, lastX = 0, lastT = 0, velocity = 0;
     let mode = "idle";
+    let backMode = false;
     let screen = null;
     const reset = (animate) => {
         if (!screen)
             return;
         const node = screen;
         if (animate) {
-            node.style.transition = "transform .3s cubic-bezier(.2,.9,.25,1), opacity .22s ease";
+            node.style.transition = "transform .34s cubic-bezier(.22,.9,.24,1), opacity .26s ease";
             node.style.transform = "";
             node.style.opacity = "";
-            window.setTimeout(() => { node.style.transition = ""; }, 340);
+            window.setTimeout(() => { node.style.transition = ""; node.style.willChange = ""; }, 360);
         }
         else {
             node.style.transition = "";
             node.style.transform = "";
             node.style.opacity = "";
+            node.style.willChange = "";
         }
         screen = null;
     };
@@ -655,12 +711,13 @@ function initSwipe() {
         if (e.touches.length !== 1 || !swipeAllowed())
             return;
         const t = e.touches[0];
-        if (t.clientX < 24 || t.clientX > window.innerWidth - 24)
+        if (t.clientX < 14 || t.clientX > window.innerWidth - 14)
             return; // leave system edge gestures alone
         if (swipeBlocked(e.target)) {
             mode = "ignore";
             return;
         }
+        backMode = overlayActive();
         startX = t.clientX;
         startY = t.clientY;
         startT = Date.now();
@@ -677,9 +734,14 @@ function initSwipe() {
         const mx = t.clientX - startX;
         const my = t.clientY - startY;
         if (mode === "pending") {
-            if (Math.abs(mx) < 8 && Math.abs(my) < 8)
+            // A finger resting on the screen (long press) or wandering vertically never starts a swipe.
+            if (Date.now() - startT > 450) {
+                mode = "ignore";
                 return;
-            if (Math.abs(my) > Math.abs(mx) * 0.9) {
+            }
+            if (Math.abs(mx) < 12 && Math.abs(my) < 12)
+                return;
+            if (Math.abs(mx) < Math.abs(my) * 1.8 || (backMode && mx < 0)) {
                 mode = "ignore";
                 return;
             }
@@ -690,7 +752,7 @@ function initSwipe() {
                 screen.style.willChange = "transform";
             }
         }
-        dx = mx;
+        dx = backMode ? Math.max(0, mx) : mx;
         const now = Date.now();
         if (now - lastT > 0)
             velocity = velocity * 0.6 + ((t.clientX - lastX) / (now - lastT)) * 0.4;
@@ -699,13 +761,13 @@ function initSwipe() {
         if (!screen)
             return;
         const i = order.indexOf(activeTab);
-        const blocked = (dx < 0 && i >= order.length - 1) || (dx > 0 && i <= 0);
-        // Follows the finger almost 1:1, with a soft limit; at the ends it resists like a rubber band.
-        const limit = window.innerWidth * 0.5;
-        const soft = limit * (1 - Math.exp(-Math.abs(dx) / limit));
-        const eased = (dx < 0 ? -1 : 1) * (blocked ? soft * 0.25 : soft);
+        const blocked = !backMode && ((dx < 0 && i >= order.length - 1) || (dx > 0 && i <= 0));
+        // Gentle: the screen follows with a soft limit, resists at the ends like a rubber band.
+        const limit = window.innerWidth * 0.42;
+        const soft = limit * (1 - Math.exp(-Math.abs(dx) / (limit * 1.15)));
+        const eased = (dx < 0 ? -1 : 1) * (blocked ? soft * 0.22 : soft * 0.85);
         screen.style.transform = `translate3d(${eased.toFixed(1)}px,0,0)`;
-        screen.style.opacity = String(1 - Math.min(Math.abs(eased) / 520, 0.32));
+        screen.style.opacity = String(1 - Math.min(Math.abs(eased) / 700, 0.22));
     }, { passive: true });
     const finish = () => {
         if (mode !== "drag") {
@@ -713,13 +775,24 @@ function initSwipe() {
             return;
         }
         mode = "idle";
+        const fast = Math.abs(velocity) > 0.4 && Math.abs(dx) > 30 && (velocity < 0) === (dx < 0);
+        const far = Math.abs(dx) > window.innerWidth * 0.22;
+        if (backMode) {
+            if (far || (fast && dx > 0)) {
+                screen = null;
+                if (activeTab === "analytics" || (teamScheduleMode && teamHasDraft()))
+                    closeOverlay();
+                else
+                    navigateWithTransition(-1, closeOverlay);
+                return;
+            }
+            reset(true);
+            return;
+        }
         const i = order.indexOf(activeTab);
-        const fast = Math.abs(velocity) > 0.45 && Math.abs(dx) > 32 && (velocity < 0) === (dx < 0);
-        const far = Math.abs(dx) > window.innerWidth * 0.2;
         const next = dx < 0 ? i + 1 : i - 1;
         if ((far || fast) && next >= 0 && next < order.length) {
             const node = screen;
-            swipeVT = true;
             setTab(order[next]);
             // If the new tab has to load first, slide the old screen back meanwhile.
             window.setTimeout(() => {
@@ -727,7 +800,7 @@ function initSwipe() {
                     screen = node;
                     reset(true);
                 }
-            }, 140);
+            }, 160);
             screen = null;
             return;
         }
@@ -795,10 +868,11 @@ async function buildTab(tab) {
             }
             if (!canAnalytics(profile))
                 return { html: errorState("Раздел доступен менеджеру и финансовому директору."), ok: false };
-            const d = await api(`/analytics/overview?view=${analyticsView}&month=${analyticsMonth}&branch=${analyticsBranch}`);
-            if (d.error)
+            const d = await fetchAnalytics(analyticsView, analyticsMonth, analyticsBranch);
+            if (!d)
                 return { html: errorState("Не удалось загрузить аналитику."), ok: false };
             analyticsData = d;
+            warmAnalytics();
             return { html: renderAnalytics(d), ok: true };
         }
         const d = profile ? { employee: profile } : await api("/me");
@@ -826,6 +900,55 @@ function requestTab(tab) {
     tabPending[key] = p;
     return p;
 }
+/** Neighbouring salary periods / schedule months are rendered in advance so month and period taps are instant. */
+async function prefetchNeighbours(tab) {
+    try {
+        if (tab === "salary") {
+            const now = uzbekistanToday().slice(0, 7);
+            const half = Number(uzbekistanToday().slice(8, 10)) <= 15 ? "p1" : "p2";
+            const jobs = [];
+            ["p1", "p2", "full"].forEach((v) => { if (v !== salaryView)
+                jobs.push([salaryMonth, v]); });
+            const [y, m] = salaryMonth.split("-").map(Number);
+            const prev = new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 7);
+            const next = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7);
+            jobs.push([prev, "full"]);
+            if (next <= now)
+                jobs.push([next, next === now ? half : "full"]);
+            for (const [month, view] of jobs) {
+                if (activeTab !== "salary")
+                    return;
+                const key = "salary:" + month + ":" + view;
+                if (tabCache[key] !== undefined)
+                    continue;
+                const d = await api("/salary?month=" + month + "&view=" + view);
+                if (d.error)
+                    continue;
+                const keep = segPrev["salary"];
+                tabCache[key] = renderSalary(d);
+                if (keep === undefined)
+                    delete segPrev["salary"];
+                else
+                    segPrev["salary"] = keep;
+            }
+        }
+        else if (tab === "schedule") {
+            const [y, m] = calendarMonth.split("-").map(Number);
+            for (const month of [new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 7), new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7)]) {
+                if (activeTab !== "schedule")
+                    return;
+                const key = "schedule:" + month;
+                if (tabCache[key] !== undefined)
+                    continue;
+                const d = await api("/schedule?month=" + month);
+                if (d.error)
+                    continue;
+                tabCache[key] = renderSchedule(d);
+            }
+        }
+    }
+    catch (e) { /* prefetch is best effort */ }
+}
 function prefetchTab(tab) {
     if (loginMode || !profile)
         return;
@@ -841,6 +964,7 @@ function prefetchAll() {
 }
 function invalidateTabs() {
     Object.keys(tabCache).forEach((k) => delete tabCache[k]);
+    clearAnalyticsCache();
     if (paintedTab)
         prefetchAll();
 }
@@ -869,10 +993,7 @@ function paintTab(tab, html, kind, dir) {
     if (doc.startViewTransition && !prefersReducedMotion()) {
         const html5 = document.documentElement;
         html5.dataset.vt = dir >= 0 ? "fwd" : "back";
-        if (swipeVT)
-            html5.dataset.vtSpeed = "swipe";
-        swipeVT = false;
-        const clear = () => { delete html5.dataset.vt; delete html5.dataset.vtSpeed; };
+        const clear = () => { delete html5.dataset.vt; };
         try {
             const t = doc.startViewTransition(() => apply("screen--vt"));
             t.finished.then(clear, clear);
@@ -900,22 +1021,30 @@ async function loadTab(tab) {
     // Instant paint from cache, then refresh in the background without replaying animations.
     if (cached !== undefined && kind !== "stay") {
         paintTab(tab, cached, kind, dir);
+        if (tab === "salary" || tab === "schedule")
+            window.setTimeout(() => { void prefetchNeighbours(tab); }, 400);
         const r = await requestTab(tab);
         if (seq !== tabSeq || !r.ok || r.html === cached)
             return;
         paintTab(tab, r.html, "stay", 0);
         return;
     }
-    // Nothing cached: keep the current screen until data arrives (no skeleton flash).
+    // Nothing cached: keep the current screen (dimmed, with a progress line) until data arrives.
     // Only the very first paint, or a long wait, shows a skeleton.
     let skeletonTimer = 0;
     if (kind === "first")
         showTabLoading(tab === "schedule" ? 2 : 3);
-    else
-        skeletonTimer = window.setTimeout(() => { if (seq === tabSeq)
-            showTabLoading(tab === "schedule" ? 2 : 3); }, 450);
+    else {
+        root().classList.add("busy");
+        skeletonTimer = window.setTimeout(() => { if (seq === tabSeq) {
+            root().classList.remove("busy");
+            showTabLoading(tab === "schedule" ? 2 : 3);
+        } }, 900);
+    }
     const result = await requestTab(tab);
     window.clearTimeout(skeletonTimer);
+    if (seq === tabSeq)
+        root().classList.remove("busy");
     if (seq !== tabSeq)
         return;
     if (!result.ok) {
@@ -930,13 +1059,17 @@ async function loadTab(tab) {
     paintTab(tab, result.html, kind === "first" ? "first" : kind, dir);
     if (kind === "first")
         prefetchAll();
+    if (tab === "salary" || tab === "schedule")
+        window.setTimeout(() => { void prefetchNeighbours(tab); }, 400);
 }
 function closeOverlay() {
+    if (teamScheduleMode && !teamLeaveGuard(closeOverlay))
+        return;
     if (inventoryMode && invBack())
         return;
     if (branchesMode && branchBack())
         return;
-    if (libraryMode && libBack())
+    if (trainingsMode && libBack())
         return;
     if (activeTab === "analytics") {
         setTab("more");
@@ -946,7 +1079,7 @@ function closeOverlay() {
         openTeam();
         return;
     }
-    if (!staffMode && !teamScheduleMode && !announcementsMode && !checklistsMode && !trainingsMode && !applicationsMode && !branchesMode && !inventoryMode && !libraryMode)
+    if (!staffMode && !teamScheduleMode && !announcementsMode && !checklistsMode && !trainingsMode && !applicationsMode && !branchesMode && !inventoryMode)
         return;
     staffMode = false;
     staffScreen = "add";
@@ -958,7 +1091,6 @@ function closeOverlay() {
     applicationsMode = false;
     branchesMode = false;
     inventoryMode = false;
-    libraryMode = false;
     trainingsData = null;
     setOverlayControls(false);
     void loadTab("more");
@@ -1035,6 +1167,7 @@ function openAnnouncements() {
     void loadAnnouncements();
 }
 function openTrainings() {
+    ensureLibListeners();
     if (!isMgr(profile))
         trainingTab = "list";
     trainingsMode = true;
@@ -1086,7 +1219,7 @@ function openTeamSchedule() {
     void loadTeamSchedule();
 }
 function setTab(tab) {
-    if (staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode || libraryMode) {
+    if (staffMode || teamScheduleMode || announcementsMode || checklistsMode || trainingsMode || applicationsMode || branchesMode || inventoryMode) {
         staffMode = false;
         staffScreen = "add";
         selectedStaffId = null;
@@ -1097,7 +1230,6 @@ function setTab(tab) {
         applicationsMode = false;
         branchesMode = false;
         inventoryMode = false;
-        libraryMode = false;
     }
     activeTab = tab;
     setOverlayControls(false);
@@ -1125,8 +1257,6 @@ function sideExtras() {
         links.push({ icon: "analytics", title: "Аналитика", action: "tab:analytics" });
         links.push({ icon: "user", title: "Команда", action: "team" });
         links.push({ icon: "user", title: "Добавить сотрудника", action: "staff" });
-        links.push({ icon: "book", title: "Прогресс обучения", action: "learn-report:trainings" });
-        links.push({ icon: "check", title: "Отчёт по чек-листам", action: "learn-report:checklists" });
         links.push({ icon: "box", title: "Инвентаризация", action: "inventory" });
         if (e.perms && e.perms.branches)
             links.push({ icon: "branch", title: "Филиалы", action: "branches" });
@@ -1141,8 +1271,7 @@ function sideExtras() {
     }
     if (e) {
         links.push({ icon: "news", title: "Объявления", action: "announcements" });
-        links.push({ icon: "book", title: "Обучение", action: "trainings" });
-        links.push({ icon: "doc", title: "Методички", action: "library" });
+        links.push({ icon: "book", title: "Обучение и Методички", action: "trainings" });
         links.push({ icon: "check", title: "Чек-листы", action: "checklists" });
     }
     const top = '<div class="side-brand"><span class="side-logo">' + icon("home") + '</span><span class="side-brand-text">Staff Hub<small>Персонал ресторана</small></span></div>';
@@ -1599,32 +1728,47 @@ async function saveTheme(theme) {
         catch (e) { /* ignore */ }
     }
 }
-async function toggleNotifications() {
+let themeTimer = 0;
+let notifTimer = 0;
+let notifSending = false;
+/** Spam-safe: the switch reacts instantly, only the final value is sent (one request at a time). */
+function toggleNotifications() {
     if (!profile)
         return;
     const sw = document.getElementById("notif-switch");
     const sub = document.getElementById("notif-sub");
     const next = !profile.notifications_on;
-    const paint = (on) => {
-        if (sw) {
-            sw.classList.toggle("switch--on", on);
-            sw.setAttribute("aria-checked", on ? "true" : "false");
-        }
-        if (sub)
-            sub.textContent = on ? "Сообщения в Telegram о графике и новостях" : "Отключены: сообщения в Telegram не приходят";
-    };
     profile.notifications_on = next;
-    paint(next);
+    if (sw) {
+        sw.classList.toggle("switch--on", next);
+        sw.setAttribute("aria-checked", next ? "true" : "false");
+    }
+    if (sub)
+        sub.textContent = next ? "Сообщения в Telegram о графике и новостях" : "Отключены: сообщения в Telegram не приходят";
+    delete tabCache["more"];
     haptic(next ? "medium" : "light");
+    window.clearTimeout(notifTimer);
+    notifTimer = window.setTimeout(() => { void sendNotifications(); }, 350);
+}
+async function sendNotifications() {
+    if (notifSending) {
+        notifTimer = window.setTimeout(() => { void sendNotifications(); }, 200);
+        return;
+    }
+    if (!profile)
+        return;
+    notifSending = true;
+    const value = profile.notifications_on;
     try {
-        const r = await api("/settings/notifications", { method: "POST", body: JSON.stringify({ on: next }) });
+        const r = await api("/settings/notifications", { method: "POST", body: JSON.stringify({ on: value }) });
         if (!r.ok)
             throw new Error("not_saved");
     }
     catch (e) {
-        profile.notifications_on = !next;
-        paint(!next);
-        tg.showAlert("Не удалось изменить настройку. Проверьте связь.");
+        tg.showAlert("Не удалось изменить настройку уведомлений. Проверьте связь.");
+    }
+    finally {
+        notifSending = false;
     }
 }
 function chooseTheme() {
@@ -1654,6 +1798,13 @@ async function removeStaffQr(employeeId) {
     });
 }
 function handleAction(action) {
+    const dir = navDirection(action);
+    if (dir !== 0)
+        navigateWithTransition(dir, () => handleActionCore(action));
+    else
+        handleActionCore(action);
+}
+function handleActionCore(action) {
     if (action.indexOf("tab:") === 0)
         return setTab(action.slice(4));
     if (action === "analytics-back")
@@ -1692,7 +1843,7 @@ function handleAction(action) {
     if (action === "month:next")
         return shiftMonth(1);
     if (action === "retry")
-        return void (staffMode ? (staffScreen === "team" ? loadTeam() : staffScreen === "edit" && selectedStaffId ? loadTeamEdit(selectedStaffId) : loadStaff()) : teamScheduleMode ? openTeamSchedule() : announcementsMode ? loadAnnouncements() : checklistsMode ? loadChecklists() : trainingsMode ? loadTrainings() : branchesMode ? loadBranches() : inventoryMode ? loadInventory() : libraryMode ? loadLibrary() : loadTab(activeTab));
+        return void (staffMode ? (staffScreen === "team" ? loadTeam() : staffScreen === "edit" && selectedStaffId ? loadTeamEdit(selectedStaffId) : loadStaff()) : teamScheduleMode ? openTeamSchedule() : announcementsMode ? loadAnnouncements() : checklistsMode ? loadChecklists() : trainingsMode ? loadTrainings() : branchesMode ? loadBranches() : inventoryMode ? loadInventory() : loadTab(activeTab));
     if (action === "staff")
         return openStaff();
     if (action === "team")
@@ -1763,17 +1914,24 @@ function handleAction(action) {
         return chooseTheme();
     if (action.indexOf("theme-set:") === 0) {
         const theme = action.slice(10);
-        if ((theme === "auto" || theme === "light" || theme === "dark") && profile) {
+        if ((theme === "auto" || theme === "light" || theme === "dark") && profile && profile.theme !== theme) {
             profile.theme = theme;
+            const html5 = document.documentElement;
+            html5.classList.add("theme-switching");
             applyTheme(theme);
+            window.requestAnimationFrame(() => window.requestAnimationFrame(() => html5.classList.remove("theme-switching")));
             haptic("light");
-            void api("/settings/theme", { method: "POST", body: JSON.stringify({ theme }) }).catch(() => tg.showAlert("Не удалось сохранить тему."));
+            delete tabCache["more"];
             const seg = root().querySelector(".setting-theme .seg");
             if (seg) {
                 const idx = ["auto", "light", "dark"].indexOf(theme);
                 seg.style.setProperty("--i", String(idx));
-                seg.querySelectorAll(".seg-btn").forEach((b, i) => b.classList.toggle("seg-btn--on", i === idx));
+                seg.querySelectorAll(".seg-btn").forEach((b, n) => b.classList.toggle("seg-btn--on", n === idx));
             }
+            window.clearTimeout(themeTimer);
+            themeTimer = window.setTimeout(() => {
+                void api("/settings/theme", { method: "POST", body: JSON.stringify({ theme: profile ? profile.theme : theme }) }).catch(() => tg.showAlert("Не удалось сохранить тему."));
+            }, 400);
         }
         return;
     }
@@ -1871,7 +2029,10 @@ function boot() {
         tg.setHeaderColor("secondary_bg_color");
         if (tg.isVersionAtLeast("7.7"))
             tg.disableVerticalSwipes();
-        tg.BackButton.onClick(() => closeOverlay());
+        tg.BackButton.onClick(() => { if (teamScheduleMode && teamHasDraft())
+            closeOverlay();
+        else
+            navigateWithTransition(-1, closeOverlay); });
         tg.MainButton.onClick(() => {
             if (staffMode)
                 void submitStaff();

@@ -1,24 +1,24 @@
-/** График для команды: выбрать смену-«кисть» и нажимать на клетки. Сохранение пакетом, есть отмена. */
+/** График для команды: выбрать смену-«кисть», нажимать на клетки, затем сохранить одним подтверждением. */
 
-interface Brush { id: string; label: string; start?: string; end?: string; off?: boolean }
+interface Brush { id: string; label: string; start?: string; end?: string; off?: boolean; letter: string }
 interface TeamPatch { employee_id: number; date: string; kind: "shift" | "day_off"; start_time: string; end_time: string }
-interface TeamPrev { employee_id: number; date: string; prev: (ShiftRow & { employee_id: number }) | null }
+interface DraftEntry { patch: TeamPatch; original: (ShiftRow & { employee_id: number }) | null }
 
 const TEAM_BRUSHES: Brush[] = [
-  { id: "morning", label: "Утро", start: "08:00", end: "16:00" },
-  { id: "day", label: "День", start: "10:00", end: "22:00" },
-  { id: "evening", label: "Вечер", start: "14:00", end: "23:00" },
-  { id: "custom", label: "Своё", start: "09:00", end: "18:00" },
-  { id: "off", label: "Выходной", off: true },
+  { id: "morning", label: "Утро", letter: "У", start: "07:00", end: "17:00" },
+  { id: "middle", label: "Промежуточный", letter: "П", start: "10:00", end: "20:00" },
+  { id: "lunch", label: "Обед", letter: "О", start: "12:00", end: "22:00" },
+  { id: "evening", label: "Вечер", letter: "В", start: "14:00", end: "00:00" },
+  { id: "custom", label: "Своё", letter: "С", start: "09:00", end: "18:00" },
+  { id: "off", label: "Выходной", letter: "·", off: true },
 ];
 
-let teamBrushId = "day";
+let teamBrushId = "middle";
 let teamFilter = "all";
 let teamRowMenu = 0;
-let teamPending: Record<string, TeamPatch> = {};
-let teamUndoList: TeamPrev[] | null = null;
+let teamDraft: Record<string, DraftEntry> = {};
+let teamHistory: Record<string, DraftEntry | null>[] = [];
 let teamSaving = false;
-let teamFlushTimer = 0;
 let teamListenersReady = false;
 let teamFilterOptions: string[] = [];
 
@@ -52,6 +52,27 @@ function brushLabel(b: Brush): string {
   return b.off ? "Выходной" : `${b.start}–${b.end}`;
 }
 
+/** Which template a stored shift corresponds to (for colours). */
+function brushOf(shift: ShiftRow | undefined): Brush | null {
+  if (!shift || shift.is_day_off) return null;
+  const st = shortTime(shift.start_time);
+  const en = shortTime(shift.end_time);
+  return TEAM_BRUSHES.find((b) => !b.off && b.id !== "custom" && b.start === st && b.end === en) || TEAM_BRUSHES[4];
+}
+
+function hourText(t: string): string {
+  const [h, m] = t.split(":");
+  return m === "00" ? String(Number(h)) : `${Number(h)}:${m}`;
+}
+
+function teamDraftCount(): number {
+  return Object.keys(teamDraft).length;
+}
+
+function teamHasDraft(): boolean {
+  return teamDraftCount() > 0;
+}
+
 /* ------------------------------------------------------------- render */
 
 function renderTeamSchedule(d: TeamScheduleData): string {
@@ -67,22 +88,22 @@ function renderTeamSchedule(d: TeamScheduleData): string {
   const editableAny = d.employees.some((e) => e.can_edit);
 
   let html = '<div class="screen team-schedule-screen"><div class="screen-title">График для команды</div>';
-  html += `<div class="screen-sub">${editableAny ? "Выберите смену и нажимайте на клетки таблицы: она сразу запишется. Нажатие на дату заполняет день для всех, нажатие на имя открывает действия для строки." : "У вас нет сотрудников, график которых вы ведёте. Таблица доступна только для просмотра."}</div>`;
+  html += `<div class="screen-sub">${editableAny ? "Выберите смену и нажимайте на клетки. Изменения не сохраняются сразу: проверьте график и нажмите «Сохранить». Нажатие на дату заполняет день для всех, нажатие на имя открывает действия для строки." : "У вас нет сотрудников, график которых вы ведёте. Таблица доступна только для просмотра."}</div>`;
   html += `<div class="team-schedule-toolbar"><button class="team-toolbar-button nav-arrow" data-action="team-range:-1" type="button" aria-label="Предыдущий период">${arrowL}</button><div class="team-period-title"><span>${MONTHS[startDate.getUTCMonth()]} ${startDate.getUTCFullYear()}</span><small>${periodLabel}</small></div><button class="team-toolbar-button nav-arrow" data-action="team-range:1" type="button" aria-label="Следующий период">${arrowR}</button></div>`;
 
   if (editableAny) {
     html += '<div class="team-palette" id="team-palette"><div class="palette-head"><span>Смена для клеток</span>' +
-      `<span class="palette-state" id="team-state">${teamSaving || Object.keys(teamPending).length ? "Сохраняем…" : "Все изменения сохранены"}</span></div><div class="brushes">`;
+      `<span class="palette-state">${teamHasDraft() ? "Есть несохранённые изменения" : "Все изменения сохранены"}</span></div><div class="brushes">`;
     TEAM_BRUSHES.forEach((b) => {
       const on = b.id === teamBrushId;
-      html += `<button type="button" class="brush${on ? " brush--on" : ""}${b.off ? " brush--off" : ""}" data-action="team-brush:${b.id}"><b>${esc(b.label)}</b><small>${b.off ? "без смены" : esc(brushLabel(b))}</small></button>`;
+      html += `<button type="button" class="brush brush--${b.id}${on ? " brush--on" : ""}" data-action="team-brush:${b.id}"><b>${esc(b.label)}</b><small>${b.off ? "без смены" : esc(brushLabel(b))}</small></button>`;
     });
     html += "</div>";
     if (brush.id === "custom") {
       html += '<div class="brush-custom"><label>С<input type="time" data-team-custom="start" value="' + esc(brush.start || "09:00") + '"></label>' +
         '<label>До<input type="time" data-team-custom="end" value="' + esc(brush.end || "18:00") + '"></label></div>';
     }
-    html += `<div class="palette-foot"><span>Повторное нажатие на клетку с такой же сменой ставит выходной.</span><button type="button" class="undo-btn" data-action="team-undo"${teamUndoList ? "" : " disabled"}>Отменить</button></div></div>`;
+    html += '<div class="palette-foot"><span>Повторное нажатие на клетку с такой же сменой ставит выходной.</span></div></div>';
   }
 
   teamFilterOptions = [...new Set(d.employees.map((e) => e.position).filter(Boolean))].sort();
@@ -100,10 +121,14 @@ function renderTeamSchedule(d: TeamScheduleData): string {
       `<button type="button" class="chip" data-action="team-fill:${menuEmp.id}:off">Весь период выходной</button></div></div>`;
   }
 
+  // legend
+  html += '<div class="team-legend">' + TEAM_BRUSHES.filter((b) => !b.off && b.id !== "custom").map((b) => `<span class="lg lg--${b.id}"><i></i>${esc(b.label)} ${b.start && b.end ? hourText(b.start) + "–" + hourText(b.end) : ""}</span>`).join("") + "</div>";
+
   html += '<div class="team-table-card"><div class="team-table-wrap"><table class="team-table"><thead><tr><th class="team-name-head">Сотрудник</th>';
   dates.forEach((date) => {
     const weekday = DOW[(new Date(`${date}T00:00:00.000Z`).getUTCDay() + 6) % 7];
-    html += `<th class="team-date-head${date === today ? " team-date-head--today" : ""}"${editableAny ? ` data-action="team-col:${date}"` : ""}><small>${weekday}</small><b>${date.slice(8)}</b></th>`;
+    const wk = (new Date(`${date}T00:00:00.000Z`).getUTCDay() + 6) % 7 >= 5;
+    html += `<th class="team-date-head${date === today ? " team-date-head--today" : ""}${wk ? " team-date-head--weekend" : ""}"${editableAny ? ` data-action="team-col:${date}"` : ""}><small>${weekday}</small><b>${date.slice(8)}</b></th>`;
   });
   html += '<th class="team-total-head">Часы</th></tr></thead><tbody>';
   if (!visible.length) {
@@ -116,9 +141,13 @@ function renderTeamSchedule(d: TeamScheduleData): string {
       dates.forEach((date) => {
         const shift = shifts[teamKey(employee.id, date)];
         const work = !!shift && !shift.is_day_off;
+        const b = brushOf(shift);
+        const changed = !!teamDraft[teamKey(employee.id, date)];
         if (work) total += shiftHours(shortTime(shift.start_time), shortTime(shift.end_time));
-        const label = work ? `${shortTime(shift.start_time)}<br>${shortTime(shift.end_time)}` : "Выходной";
-        html += `<td><button class="team-shift${work ? " team-shift--work" : " team-shift--off"}${editable ? "" : " team-shift--locked"}" ${editable ? `data-action="team-cell:${employee.id}:${date}"` : "disabled"} type="button">${label}</button></td>`;
+        const inner = work && b
+          ? `<em>${b.letter}</em><span>${hourText(shortTime(shift.start_time))}–${hourText(shortTime(shift.end_time))}</span>`
+          : "<em>·</em>";
+        html += `<td><button class="tcell${work && b ? " tcell--" + b.id : " tcell--off"}${changed ? " tcell--changed" : ""}${editable ? "" : " tcell--locked"}" ${editable ? `data-action="team-cell:${employee.id}:${date}"` : "disabled"} type="button" aria-label="${esc(employee.name)}, ${date}">${inner}</button></td>`;
       });
       html += `<td class="team-total">${total ? hoursText(total) : "—"}</td></tr>`;
     });
@@ -131,8 +160,13 @@ function renderTeamSchedule(d: TeamScheduleData): string {
   }
   html += '</tbody></table></div></div>';
   html += '<div class="team-schedule-actions"><button class="team-export-button" data-action="team-export" type="button">' + icon("doc") + '<span>Скачать Excel</span></button></div>';
-  html += '<div class="section-footer">Сотрудники получают одно уведомление об изменениях, а не по одному на каждую клетку.</div></div>';
-  return html;
+  html += '<div class="section-footer">Сотрудники получат одно уведомление об изменениях, а не по одному на каждую клетку.</div>';
+  const n = teamDraftCount();
+  html += `<div class="team-savebar${n ? " team-savebar--on" : ""}" id="team-savebar"><div class="sb-text"><b>${n}</b><small>${plural(n, "изменение", "изменения", "изменений")}</small></div>` +
+    `<button type="button" class="sb-btn sb-btn--ghost" data-action="team-undo"${teamHistory.length ? "" : " disabled"}>Шаг назад</button>` +
+    '<button type="button" class="sb-btn sb-btn--ghost" data-action="team-reset">Сбросить</button>' +
+    `<button type="button" class="sb-btn sb-btn--main" data-action="team-save"${teamSaving ? " disabled" : ""}>${teamSaving ? "Сохраняем…" : "Сохранить"}</button></div>`;
+  return html + "</div>";
 }
 
 function repaintTeam(): void {
@@ -146,11 +180,8 @@ function repaintTeam(): void {
   if (next) next.scrollLeft = left;
   const nextChips = root().querySelector<HTMLElement>(".chips--scroll");
   if (nextChips) nextChips.scrollLeft = chipLeft;
-}
-
-function teamSetState(): void {
-  const el = document.getElementById("team-state");
-  if (el) el.textContent = teamSaving || Object.keys(teamPending).length ? "Сохраняем…" : "Все изменения сохранены";
+  const bar = document.getElementById("team-savebar");
+  if (bar && teamHasDraft()) { bar.classList.remove("team-savebar--on"); void bar.offsetWidth; bar.classList.add("team-savebar--on"); }
 }
 
 /* ------------------------------------------------------------ editing */
@@ -166,78 +197,120 @@ function setLocalShift(d: TeamScheduleData, patch: TeamPatch): void {
   } as ShiftRow & { employee_id: number });
 }
 
+function restoreLocal(d: TeamScheduleData, entry: DraftEntry): void {
+  const { employee_id, date } = entry.patch;
+  d.shifts = d.shifts.filter((s) => !(s.employee_id === employee_id && s.date === date));
+  if (entry.original) d.shifts.push(entry.original);
+}
+
+function sameAsOriginal(entry: DraftEntry): boolean {
+  const o = entry.original;
+  const p = entry.patch;
+  if (p.kind === "day_off") return !o || !!o.is_day_off;
+  return !!o && !o.is_day_off && shortTime(o.start_time) === p.start_time && shortTime(o.end_time) === p.end_time;
+}
+
 function applyTeamCells(cells: { employeeId: number; date: string }[], brush: Brush, toggle: boolean): void {
   const d = teamScheduleData;
   if (!d || !cells.length) return;
   const shifts = teamLookup(d);
-  const prev: TeamPrev[] = [];
+  const before: Record<string, DraftEntry | null> = {};
   let changed = 0;
   cells.forEach((c) => {
     const emp = d.employees.find((e) => e.id === c.employeeId);
     if (!emp || !emp.can_edit) return;
-    const current = shifts[teamKey(c.employeeId, c.date)] || null;
-    let patch: TeamPatch;
+    const key = teamKey(c.employeeId, c.date);
+    const current = shifts[key] || null;
     const same = !!current && !current.is_day_off && !brush.off && shortTime(current.start_time) === brush.start && shortTime(current.end_time) === brush.end;
-    if (brush.off || (toggle && same)) patch = { employee_id: c.employeeId, date: c.date, kind: "day_off", start_time: "", end_time: "" };
-    else patch = { employee_id: c.employeeId, date: c.date, kind: "shift", start_time: brush.start || "10:00", end_time: brush.end || "22:00" };
-    const alreadyOff = patch.kind === "day_off" && (!current || !!current.is_day_off) && !!current;
+    const patch: TeamPatch = brush.off || (toggle && same)
+      ? { employee_id: c.employeeId, date: c.date, kind: "day_off", start_time: "", end_time: "" }
+      : { employee_id: c.employeeId, date: c.date, kind: "shift", start_time: brush.start || "10:00", end_time: brush.end || "20:00" };
+    const alreadyOff = patch.kind === "day_off" && (!current || !!current.is_day_off);
     if (alreadyOff) return;
-    prev.push({ employee_id: c.employeeId, date: c.date, prev: current });
+    before[key] = teamDraft[key] || null;
+    const original = teamDraft[key] ? teamDraft[key].original : current;
+    const entry: DraftEntry = { patch, original };
     setLocalShift(d, patch);
-    teamPending[teamKey(c.employeeId, c.date)] = patch;
+    if (sameAsOriginal(entry)) delete teamDraft[key]; else teamDraft[key] = entry;
     changed += 1;
   });
   if (!changed) return;
-  teamUndoList = prev;
+  teamHistory.push(before);
+  if (teamHistory.length > 30) teamHistory.shift();
   haptic("light");
   repaintTeam();
-  scheduleTeamFlush();
 }
 
-function scheduleTeamFlush(): void {
-  window.clearTimeout(teamFlushTimer);
-  teamFlushTimer = window.setTimeout(() => { void flushTeam(); }, 900);
-}
-
-async function flushTeam(): Promise<void> {
-  window.clearTimeout(teamFlushTimer);
-  const items = Object.keys(teamPending).map((k) => teamPending[k]);
-  if (!items.length || teamSaving) return;
-  teamPending = {};
-  teamSaving = true;
-  teamSetState();
-  try {
-    const r = await api<{ ok: boolean; applied?: number }>("/schedule/team/batch", { method: "POST", body: JSON.stringify({ items }) });
-    if (!r.ok) throw new Error("not_saved");
-    haptic("success");
-  } catch (e) {
-    teamUndoList = null;
-    tg.showAlert("Не удалось сохранить часть изменений. Таблица обновлена из базы.");
-    haptic("error");
-    teamSaving = false;
-    void loadTeamSchedule();
-    return;
-  }
-  teamSaving = false;
-  if (Object.keys(teamPending).length) { void flushTeam(); return; }
-  teamSetState();
-}
-
-function undoTeam(): void {
+function undoTeamStep(): void {
   const d = teamScheduleData;
-  if (!d || !teamUndoList) return;
-  const list = teamUndoList;
-  teamUndoList = null;
-  list.forEach((p) => {
-    const patch: TeamPatch = p.prev && !p.prev.is_day_off
-      ? { employee_id: p.employee_id, date: p.date, kind: "shift", start_time: shortTime(p.prev.start_time), end_time: shortTime(p.prev.end_time) }
-      : { employee_id: p.employee_id, date: p.date, kind: "day_off", start_time: "", end_time: "" };
-    setLocalShift(d, patch);
-    teamPending[teamKey(p.employee_id, p.date)] = patch;
+  const last = teamHistory.pop();
+  if (!d || !last) return;
+  Object.keys(last).forEach((key) => {
+    const [emp, date] = key.split(":");
+    const prevEntry = last[key];
+    const cur = teamDraft[key];
+    if (prevEntry) {
+      setLocalShift(d, prevEntry.patch);
+      teamDraft[key] = prevEntry;
+    } else if (cur) {
+      restoreLocal(d, cur);
+      delete teamDraft[key];
+    } else {
+      void emp; void date;
+    }
   });
   haptic("light");
   repaintTeam();
-  scheduleTeamFlush();
+}
+
+function resetTeamDraft(): void {
+  const d = teamScheduleData;
+  if (!d) return;
+  Object.keys(teamDraft).forEach((k) => restoreLocal(d, teamDraft[k]));
+  teamDraft = {};
+  teamHistory = [];
+  repaintTeam();
+}
+
+function confirmSaveTeam(): void {
+  const n = teamDraftCount();
+  if (!n || teamSaving) return;
+  tg.showConfirm(`Сохранить график (${n} ${plural(n, "изменение", "изменения", "изменений")})? Сотрудники получат уведомление.`, (ok) => { if (ok) void saveTeam(); });
+}
+
+async function saveTeam(): Promise<boolean> {
+  const items = Object.keys(teamDraft).map((k) => teamDraft[k].patch);
+  if (!items.length || teamSaving) return true;
+  teamSaving = true;
+  repaintTeam();
+  try {
+    const r = await api<{ ok: boolean }>("/schedule/team/batch", { method: "POST", body: JSON.stringify({ items }) });
+    if (!r.ok) throw new Error("not_saved");
+    teamDraft = {};
+    teamHistory = [];
+    teamSaving = false;
+    haptic("success");
+    repaintTeam();
+    return true;
+  } catch (e) {
+    teamSaving = false;
+    haptic("error");
+    tg.showAlert("Не удалось сохранить график. Изменения остались в таблице, попробуйте ещё раз.");
+    repaintTeam();
+    return false;
+  }
+}
+
+/** Leaving with unsaved changes asks first. Returns true when it is fine to go on. */
+function teamLeaveGuard(proceed: () => void): boolean {
+  if (!teamHasDraft()) return true;
+  tg.showConfirm("Есть несохранённые изменения графика. Выйти без сохранения?", (ok) => {
+    if (!ok) return;
+    teamDraft = {};
+    teamHistory = [];
+    proceed();
+  });
+  return false;
 }
 
 function ensureTeamListeners(): void {
@@ -255,7 +328,8 @@ function ensureTeamListeners(): void {
 function teamEnter(): void {
   ensureTeamListeners();
   teamRowMenu = 0;
-  teamUndoList = null;
+  teamDraft = {};
+  teamHistory = [];
 }
 
 /** Returns true when the action was handled here. */
@@ -297,16 +371,17 @@ function handleTeamAction(action: string): boolean {
     applyTeamCells(dates.map((date) => ({ employeeId: Number(id), date })), brush, false);
     return true;
   }
-  if (action === "team-undo") { undoTeam(); return true; }
+  if (action === "team-undo") { undoTeamStep(); return true; }
+  if (action === "team-reset") {
+    tg.showConfirm("Сбросить все несохранённые изменения?", (ok) => { if (ok) resetTeamDraft(); });
+    return true;
+  }
+  if (action === "team-save") { confirmSaveTeam(); return true; }
   if (action.indexOf("team-range:") === 0) {
     const direction = Number(action.slice(11));
     if (direction !== -1 && direction !== 1) return true;
-    void flushTeam().then(() => {
-      moveTeamSchedulePeriod(direction);
-      teamRowMenu = 0;
-      teamUndoList = null;
-      void loadTeamSchedule();
-    });
+    const go = () => { moveTeamSchedulePeriod(direction); teamRowMenu = 0; void loadTeamSchedule(); };
+    if (teamLeaveGuard(go)) go();
     return true;
   }
   return false;

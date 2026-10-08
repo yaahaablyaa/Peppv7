@@ -426,7 +426,7 @@ module.exports = function registerApi(bot, sdk) {
       can_manage: roles.isGlobal(emp),
       branches: rows.map((b) => ({
         ...b,
-        staff: db.get("SELECT COUNT(*) AS c FROM employees WHERE branch_id = ? AND active = 1 AND role NOT IN ('manager', 'owner', 'chef', 'finance', 'bar_manager')", [b.id]).c,
+        staff: db.get("SELECT COUNT(*) AS c FROM employees WHERE branch_id = ? AND active = 1 AND role != 'owner'", [b.id]).c,
       })),
     };
   });

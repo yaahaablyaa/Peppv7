@@ -283,7 +283,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   const json = (await res.json()) as { data?: T; error?: string };
-  if (init && init.method && init.method.toUpperCase() !== "GET" && typeof invalidateTabs === "function") invalidateTabs();
+  if (init && init.method && init.method.toUpperCase() !== "GET" && path.indexOf("/settings/") !== 0 && typeof invalidateTabs === "function") invalidateTabs();
   if (json && json.data !== undefined) return json.data;
   return json as unknown as T;
 }
